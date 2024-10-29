@@ -816,7 +816,7 @@ class ObservationsClass(MastQueryWithLogin):
         products = self.filter_products(products, mrp_only=mrp_only, **filters)
 
         # remove duplicate products
-        products = self._remove_duplicate_products(products)
+        products = utils.remove_duplicate_products(products, 'dataURI')
 
         if not len(products):
             warnings.warn("No products to download.", NoResultsWarning)
@@ -928,7 +928,7 @@ class ObservationsClass(MastQueryWithLogin):
             return
 
         # Remove duplicate products
-        data_products = self._remove_duplicate_products(data_products)
+        data_products = utils.remove_duplicate_products(data_products, 'dataURI')
 
         return self._cloud_connection.get_cloud_uri_list(data_products, include_bucket, full_url)
 
@@ -1009,7 +1009,7 @@ class ObservationsClass(MastQueryWithLogin):
             Table containing products with unique dataURIs.
         """
         products = self.get_product_list(observations)
-        unique_products = self._remove_duplicate_products(products)
+        unique_products = utils.remove_duplicate_products(products, 'dataURI')
         if len(unique_products) < len(products):
             log.info("To return all products, use `Observations.get_product_list`")
         return unique_products

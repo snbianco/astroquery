@@ -108,6 +108,7 @@ class ServiceAPI(BaseQuery):
 
     SERVICE_URL = conf.server
     REQUEST_URL = conf.server + "/api/v0.1/"
+    MISSIONS_DOWNLOAD_URL = conf.server + "/search/"
     SERVICES = {}
 
     def __init__(self, session=None):
@@ -224,7 +225,7 @@ class ServiceAPI(BaseQuery):
 
     @class_or_instance
     @deprecated_renamed_argument('page_size', 'pagesize', since='0.4.8')
-    def service_request_async(self, service, params, pagesize=None, page=None, use_json=False, **kwargs):
+    def service_request_async(self, service, params, method='POST', pagesize=None, page=None, use_json=False, **kwargs):
         """
         Given a MAST fabric service and parameters, builds and executes a fabric microservice catalog query.
         See documentation `here <https://catalogs.mast.stsci.edu/docs/index.html>`__
@@ -236,6 +237,7 @@ class ServiceAPI(BaseQuery):
            The MAST catalogs service to query. Should be present in self.SERVICES
         params : dict
            JSON object containing service parameters.
+        method : 'GET' or 'POST'
         pagesize : int, optional
            Default None.
            Can be used to override the default pagesize (set in configs) for this query only.
@@ -311,7 +313,9 @@ class ServiceAPI(BaseQuery):
             else:
                 catalogs_request = params
 
-        response = self._request('POST', request_url, data=catalogs_request, headers=headers, use_json=use_json)
+        params = None if method == 'POST' else params
+        response = self._request(method, request_url, params=params, data=catalogs_request,
+                                 headers=headers, use_json=use_json)
         return response
 
     def _build_catalogs_params(self, params):
@@ -383,12 +387,5 @@ class ServiceAPI(BaseQuery):
         response : boolean
             Whether the passed dict has at least one criteria parameter
         """
-        criteria_check = False
         non_criteria_params = ["columns", "sort_by", "page_size", "pagesize", "page"]
-        criteria_keys = criteria.keys()
-        for key in criteria_keys:
-            if key not in non_criteria_params:
-                criteria_check = True
-                break
-
-        return criteria_check
+        return any(key not in non_criteria_params for key in criteria)
