@@ -216,7 +216,7 @@ def _split_list_into_chunks(input_list, chunk_size):
 
 def remove_duplicate_products(data_products, uri_key):
     """
-    Removes duplicate data products that have the same dataURI.
+    Removes duplicate data products that have the same data URI.
 
     Parameters
     ----------

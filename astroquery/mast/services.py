@@ -119,6 +119,8 @@ class ServiceAPI(BaseQuery):
 
         self.TIMEOUT = conf.timeout
 
+        self._column_configs = {}  # Dict to hold column configurations for services
+
     def set_service_params(self, service_dict, service_name="", server_prefix=False):
         """
         Initialize the request url and available queries for a given service.
@@ -225,7 +227,7 @@ class ServiceAPI(BaseQuery):
 
     @class_or_instance
     @deprecated_renamed_argument('page_size', 'pagesize', since='0.4.8')
-    def service_request_async(self, service, params, method='POST', pagesize=None, page=None, use_json=False, **kwargs):
+    def service_request_async(self, service, params, pagesize=None, page=None, use_json=False, **kwargs):
         """
         Given a MAST fabric service and parameters, builds and executes a fabric microservice catalog query.
         See documentation `here <https://catalogs.mast.stsci.edu/docs/index.html>`__
@@ -268,27 +270,28 @@ class ServiceAPI(BaseQuery):
 
         request_url = self.REQUEST_URL + service_url.format(**compiled_service_args)
 
+        # Default headers
         headers = {
             'User-Agent': self._session.headers['User-Agent'],
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json'
         }
+
         # Params as a list of tuples to allow for multiple parameters added
         catalogs_request = []
-        if not page:
-            page = params.pop('page', None)
-        if not pagesize:
-            pagesize = params.pop('pagesize', None)
+        page = page or params.pop('page', None)
+        pagesize = pagesize or params.pop('pagesize', None)
 
+        # Add pagination if specified
         if page is not None:
             catalogs_request.append(('page', page))
         if pagesize is not None:
             catalogs_request.append(('pagesize', pagesize))
 
+        # Populate parameters based on `use_json`
         if not use_json:
-            # Decompose filters, sort
-            for prop, value in kwargs.items():
-                params[prop] = value
+            # When not using JSON, merge kwargs into params and build query
+            params.update(kwargs)
             catalogs_request.extend(self._build_catalogs_params(params))
         else:
             headers['Content-Type'] = 'application/json'
@@ -302,20 +305,56 @@ class ServiceAPI(BaseQuery):
                 params_dict = {}
                 for key, val in catalogs_request:
                     params_dict.setdefault(key, []).append(val)
-                catalogs_request = params_dict
 
                 # Removing single-element lists. Single values will live on their own (except for `sort_by`)
-                for key in catalogs_request.keys():
-                    if (key != 'sort_by') & (len(catalogs_request[key]) == 1):
-                        catalogs_request[key] = catalogs_request[key][0]
+                catalogs_request = {
+                    k: v if k == 'sort_by' or len(v) > 1 else v[0]
+                    for k, v in params_dict.items()
+                }
 
             # Otherwise, catalogs_request can remain as the original params dict
             else:
                 catalogs_request = params
 
-        params = None if method == 'POST' else params
-        response = self._request(method, request_url, params=params, data=catalogs_request,
-                                 headers=headers, use_json=use_json)
+        response = self._request('POST', request_url, data=catalogs_request, headers=headers, use_json=use_json)
+        return response
+
+    def missions_request_async(self, service, params):
+        """
+        Builds and executes an asynchronous query to the MAST Search API.
+
+        Parameters
+        ----------
+        service : str
+           The MAST Search API service to query. Should be present in self.SERVICES.
+        params : dict
+           JSON object containing service parameters.
+
+        Returns
+        -------
+        response : list of `~requests.Response`
+        """
+        service_config = self.SERVICES.get(service.lower())
+        request_url = self.REQUEST_URL + service_config.get('path')
+
+        # Default headers
+        headers = {
+            'User-Agent': self._session.headers['User-Agent'],
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+
+        # Determine request method and payload based on service
+        method = 'POST' if service == 'search' else 'GET'
+        data, params = (params, None) if method == 'POST' else (None, params)
+
+        # make request
+        response = self._request(method=method,
+                                 url=request_url,
+                                 params=params,
+                                 data=data,
+                                 headers=headers,
+                                 use_json=True)
         return response
 
     def _build_catalogs_params(self, params):
@@ -358,6 +397,7 @@ class ServiceAPI(BaseQuery):
             elif prop == 'columns':
                 catalog_params.extend(tuple(('columns', col) for col in value))
             else:
+                # TODO: This is where we would put the PANSTARRS query check
                 if isinstance(value, list):
                     # A composed list of multiple filters for a single column
                     # Extract each filter value in list

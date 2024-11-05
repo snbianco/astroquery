@@ -6,24 +6,23 @@ MAST Missions
 This module contains methods for searching MAST missions.
 """
 
-from urllib.parse import quote
+import difflib
 import numpy as np
 import requests
 import warnings
 from pathlib import Path
+from urllib.parse import quote
 
-from astropy.table import Table, Row
 import astropy.units as u
 import astropy.coordinates as coord
+from astropy.table import Table, Row
 
 from astroquery.utils import commons, async_to_sync
 from astroquery.utils.class_or_instance import class_or_instance
-from astroquery.exceptions import InvalidQueryError, MaxResultsWarning, NoResultsWarning
+from astroquery.exceptions import InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning
 
-from astroquery.mast import utils
-from astroquery.mast.core import MastQueryWithLogin
-
-from . import conf
+from . import conf, utils
+from .core import MastQueryWithLogin
 
 __all__ = ['MastMissionsClass', 'MastMissions']
 
@@ -35,23 +34,43 @@ class MastMissionsClass(MastQueryWithLogin):
     Class that allows direct programmatic access to retrieve metadata via the MAST search API for a given mission.
     """
 
+    # Static class variables
+    _search = 'search'
+    _list_products = 'list_products'
+    _supported_missions = ['hst', 'jwst', 'classy', 'ullyses']
+
     def __init__(self, *, mission='hst'):
         super().__init__()
 
         self._search_option_fields = ['limit', 'offset', 'sort_by', 'search_key', 'sort_desc', 'select_cols',
                                       'skip_count', 'user_fields']
-        self.mission = mission
-        self.mission_kwds = {
-            'hst': {'dataset_id': 'sci_data_set_name'},
-            'jwst': {'dataset_id': 'fileSetName'}
+        self.dataset_kwds = {  # column keywords corresponding to dataset ID
+            'hst': 'sci_data_set_name',
+            'jwst': 'fileSetName'
         }
-        self.limit = 5000
+        self.limit = 5000  # maximum number of results
+        self.columns = dict()
+        self.service = self._search
+        self.service_dict = {self._search: {'path': 'search'},
+                             self._list_products: {'path': 'list_products'}}
+        self.mission = mission
+        self._service_api_connection.set_service_params(self.service_dict, f'search/{self.mission}')
 
-        self.service = 'search'
-        service_dict = {'search': {'path': 'search', 'args': {}},
-                        'list_products': {'path': 'list_products', 'args': {}},
-                        'retrieve_product': {'path': 'retrieve_product', 'args': {}}}
-        self._service_api_connection.set_service_params(service_dict, f'search/{self.mission}')
+    @property
+    def mission(self):
+        return self._mission
+
+    @mission.setter
+    def mission(self, value):
+        # Check that mission is valid
+        value = value.lower()
+        if value not in self._supported_missions:
+            raise ValueError(f'Mission {value} is not a supported mission.'
+                             f' Mission must be one of: {", ".join(self._supported_missions)}')
+
+        # Need to update the service parameters if the mission is changed
+        self._mission = value
+        self._service_api_connection.set_service_params(self.service_dict, f'search/{self.mission}')
 
     def _parse_result(self, response, *, verbose=False):  # Used by the async_to_sync decorator functionality
         """
@@ -71,9 +90,10 @@ class MastMissionsClass(MastQueryWithLogin):
         response : `~astropy.table.Table`
         """
 
-        if self.service == 'search':
+        if self.service == self._search:
             results = self._service_api_connection._parse_result(response, verbose, data_key='results')
-        elif self.service == 'list_products':
+        elif self.service == self._list_products:
+            # Results from list_products endpoint need to be handled differently
             results = Table(response.json()['products'])
 
         if len(results) >= self.limit:
@@ -82,8 +102,40 @@ class MastMissionsClass(MastQueryWithLogin):
 
         return results
 
+    def _validate_criteria(self, **criteria):
+        """
+        Check that criteria keyword arguments are valid key names. Raises InvalidQueryError if a criteria
+        argument is not valid
+
+        Parameters
+        ----------
+        **kwargs
+            Keyword arguments representing criteria filters to apply.
+
+        Raises
+        -------
+        InvalidQueryError
+            If a keyword does not match any valid column names, an error is raised that suggests the closest
+            matching column name, if available.
+        """
+        # Ensure that self.columns in populated
+        self.get_column_list()
+
+        # Check each criteria argument for validity
+        valid_cols = self.columns[self.mission]['name']
+        for kwd in criteria.keys():
+            if kwd not in valid_cols:
+                closest_match = difflib.get_close_matches(kwd, valid_cols, n=1)
+                error_msg = (
+                    f"Filter '{kwd}' does not exist. Did you mean '{closest_match[0]}'?"
+                    if closest_match
+                    else f"Filter '{kwd}' does not exist."
+                )
+                raise InvalidQueryError(error_msg)
+
     @class_or_instance
-    def query_region_async(self, coordinates, *, radius=3*u.arcmin, limit=5000, offset=0, **kwargs):
+    def query_region_async(self, coordinates, *, radius=3*u.arcmin, limit=5000, offset=0,
+                           select_cols=[], **kwargs):
         """
         Given a sky position and radius, returns a list of matching dataset IDs.
 
@@ -103,12 +155,13 @@ class MastMissionsClass(MastQueryWithLogin):
         offset : int
             Optional and default is 0
             the number of records you wish to skip before selecting records.
+        select_cols: list
+            names of columns that will be included in the astropy table
         **kwargs
             Other mission-specific keyword args.
-            Any invalid keys are ignored by the API.
             All valid key names can be found using `~astroquery.mast.missions.MastMissionsClass.get_column_list`
             function.
-            For example one can specify the output columns(select_cols) or use other filters(conditions)
+            For example, one can specify the output columns(select_cols) or use other filters(conditions)
 
         Returns
         -------
@@ -116,7 +169,10 @@ class MastMissionsClass(MastQueryWithLogin):
         """
 
         self.limit = limit
-        self.service = 'search'
+        self.service = self._search
+
+        # Check that criteria arguments are valid
+        self._validate_criteria(**kwargs)
 
         # Put coordinates and radius into consistent format
         coordinates = commons.parse_coordinates(coordinates)
@@ -124,12 +180,16 @@ class MastMissionsClass(MastQueryWithLogin):
         # if radius is just a number we assume degrees
         radius = coord.Angle(radius, u.arcmin)
 
+        # Dataset ID column should always be returned
+        select_cols.append(self.dataset_kwds[self.mission])
+
         # basic params
         params = {'target': [f"{coordinates.ra.deg} {coordinates.dec.deg}"],
                   'radius': radius.arcsec,
                   'radius_units': 'arcseconds',
                   'limit': limit,
-                  'offset': offset}
+                  'offset': offset,
+                  'select_cols': select_cols}
 
         params['conditions'] = []
         # adding additional user specified parameters
@@ -139,7 +199,7 @@ class MastMissionsClass(MastQueryWithLogin):
             else:
                 params[prop] = value
 
-        return self._service_api_connection.service_request_async(self.service, params, use_json=True)
+        return self._service_api_connection.missions_request_async(self.service, params)
 
     @class_or_instance
     def query_criteria_async(self, *, coordinates=None, objectname=None, radius=3*u.arcmin,
@@ -183,13 +243,20 @@ class MastMissionsClass(MastQueryWithLogin):
         """
 
         self.limit = limit
-        self.service = 'search'
+        self.service = self._search
 
+        # Check that criteria arguments are valid
+        self._validate_criteria(**criteria)
+
+        # Parse user input location
         if objectname or coordinates:
             coordinates = utils.parse_input_location(coordinates, objectname)
 
         # if radius is just a number we assume degrees
         radius = coord.Angle(radius, u.arcmin)
+
+        # Dataset ID column should always be returned
+        select_cols.append(self.dataset_kwds[self.mission])
 
         # build query
         params = {"limit": self.limit, "offset": offset, 'select_cols': select_cols}
@@ -208,7 +275,7 @@ class MastMissionsClass(MastQueryWithLogin):
             else:
                 params[prop] = value
 
-        return self._service_api_connection.service_request_async(self.service, params, use_json=True)
+        return self._service_api_connection.missions_request_async(self.service, params)
 
     @class_or_instance
     def query_object_async(self, objectname, *, radius=3*u.arcmin, limit=5000, offset=0, **kwargs):
@@ -246,144 +313,154 @@ class MastMissionsClass(MastQueryWithLogin):
         return self.query_region_async(coordinates, radius=radius, limit=limit, offset=offset, **kwargs)
 
     @class_or_instance
-    def get_prodict_list_async(self, datasets):
+    def get_product_list_async(self, datasets):
         """
-        Test
-        """
-        self.service = 'list_products'
+        Given a dataset ID or list of dataset IDs, returns a list of associated data products.
 
-        # Getting array of dataset IDs
-        if isinstance(datasets, Table) or isinstance(datasets, Row):
-            datasets = datasets[self.mission_kwds[self.mission]['dataset_id']]
-        if isinstance(datasets, str):
+        Parameters
+        ----------
+        datasets : str, list, `~astropy.table.Row`, `~astropy.table.Table`
+            Row/Table of MastMissions query results (e.g. output from `query_object`)
+            or single/list of dataset ID(s).
+
+        Returns
+        -------
+        response : list of `~requests.Response`
+        """
+
+        self.service = self._list_products
+
+        # Extract dataset IDs based on input type and mission
+        if isinstance(datasets, Table):
+            datasets = datasets[self.dataset_kwds[self.mission]]
+        elif isinstance(datasets, Row):
+            datasets = np.array([datasets[self.dataset_kwds[self.mission]]])
+        elif isinstance(datasets, str):
             datasets = np.array([datasets])
-        if isinstance(datasets, list):
+        elif isinstance(datasets, list):
             datasets = np.array(datasets)
+        else:
+            raise TypeError('Unsupported data type for `datasets`. Expected string, '
+                            'list of strings, Astropy row, or Astropy Table.')
 
+        # Filter out empty strings from IDs
         datasets = datasets[datasets != '']
         if datasets.size == 0:
             raise InvalidQueryError("Dataset list is empty, no associated products.")
 
+        # Send async service request
         params = {'dataset_ids': ','.join(datasets)}
-
-        return self._service_api_connection.service_request_async(self.service, params, method='GET', use_json=True)
+        return self._service_api_connection.missions_request_async(self.service, params)
 
     def filter_products(self, products, *, extension=None, **filters):
         """
-        Takes an `~astropy.table.Table` of mission data products and filters it based on given filters.
+        Filters an `~astropy.table.Table` of mission data products based on given filters.
 
         Parameters
         ----------
         products : `~astropy.table.Table`
             Table containing data products to be filtered.
         extension : string or array, optional
-            Default None. Option to filter by file extension.
+            Default is None. Filters by file extension(s), matching any specified extensions.
         **filters :
-            Filters to be applied.
-            The column name is the keyword, with the argument being one or more acceptable values
-            for that parameter.
-            Filter behavior is AND between the filters and OR within a filter set.
+            Column-based filters to be applied.
+            Each keyword corresponds to a column name in the table, with the argument being one or more
+            acceptable values for that column. AND logic is applied between filters, OR logic within
+            each filter set.
             For example: type="science", extension=["fits","jpg"]
 
         Returns
         -------
         response : `~astropy.table.Table`
+            Filtered Table of data products.
         """
 
+        # Start with a mask of True for all entries
         filter_mask = np.full(len(products), True, dtype=bool)
 
-        # Applying extension filter
+        # Filter by file extension, if provided
         if extension:
-            if isinstance(extension, str):
-                extension = [extension]
+            extensions = [extension] if isinstance(extension, str) else extension
+            ext_mask = np.array(
+                [not isinstance(x, np.ma.core.MaskedConstant) and any(x.endswith(ext) for ext in extensions)
+                 for x in products["filename"]],
+                dtype=bool
+            )
+            filter_mask &= ext_mask
 
-            mask = np.full(len(products), False, dtype=bool)
-            for elt in extension:
-                mask |= [False if isinstance(x, np.ma.core.MaskedConstant) else x.endswith(elt)
-                         for x in products["filename"]]
-            filter_mask &= mask
-
-        # Applying the rest of the filters
+        # Applying column-based filters
         for colname, vals in filters.items():
+            if colname not in products.colnames:
+                warnings.warn(f"Column '{colname}' not found in product table.", InputWarning)
 
-            if isinstance(vals, str):
-                vals = [vals]
+            vals = [vals] if isinstance(vals, str) else vals
+            col_mask = np.isin(products[colname], vals)
+            filter_mask &= col_mask
 
-            mask = np.full(len(products), False, dtype=bool)
-            for elt in vals:
-                mask |= (products[colname] == elt)
-
-            filter_mask &= mask
-
-        return products[np.where(filter_mask)]
+        # Return filtered products
+        return products[filter_mask]
 
     def download_file(self, uri, *, local_path=None, cache=True, verbose=True):
         """
-        Downloads a single file based on the data URI
+        Downloads a single file based on the data URI.
 
         Parameters
         ----------
         uri : str
-            The product dataURI, e.g. mast:JWST/product/jw00736-o039_t001_miri_ch1-long_x1d.fits
+            The product dataURI
         local_path : str
             Directory or filename to which the file will be downloaded.  Defaults to current working directory.
         cache : bool
-            Default is True. If file is found on disk it will not be downloaded again.
+            Default is True. If file is found on disk, it will not be downloaded again.
         verbose : bool, optional
-            Default True. Whether to show download progress in the console.
+            Default is True. Whether to show download progress in the console.
 
         Returns
         -------
         status: str
-            download status message.  Either COMPLETE, SKIPPED, or ERROR.
+            Download status message.  Either COMPLETE, SKIPPED, or ERROR.
         msg : str
             An error status message, if any.
         url : str
-            The full url download path
+            The full URL download path.
         """
 
-        # create the full data URL
+        # Construct the full data URL
         base_url = self._service_api_connection.MISSIONS_DOWNLOAD_URL + self.mission + '/api/v0.1/retrieve_product'
-        data_url = base_url + "?product_name=" + uri
-        escaped_url = base_url + "?product_name=" + quote(uri, safe=":")
+        data_url = base_url + '?product_name=' + uri
+        escaped_url = base_url + '?product_name=' + quote(uri, safe=':')
 
-        # parse a local file path from local_path parameter.  Use current directory as default.
+        # Determine local file path. Use current directory as default.
         filename = Path(uri).name
-        if not local_path:  # local file path is not defined
-            local_path = filename
-        else:
-            path = Path(local_path)
-            if not path.suffix:  # local_path is a directory
-                local_path = path / filename  # append filename
-                if not path.exists():  # create directory if it doesn't exist
-                    path.mkdir(parents=True, exist_ok=True)
+        local_path = Path(local_path or filename)
+        if not local_path.suffix:  # Append filename if local path is directory
+            local_path = local_path / filename
+            local_path.parent.mkdir(parents=True, exist_ok=True)
 
-        status = "COMPLETE"
+        status = 'COMPLETE'
         msg = None
         url = None
 
         try:
-            self._download_file(escaped_url, local_path,
-                                cache=cache, continuation=False,
-                                verbose=verbose)
+            # Attempt file download
+            self._download_file(escaped_url, local_path, cache=cache, continuation=False, verbose=verbose)
 
-            # check if file exists also this is where would perform md5,
-            # and also check the filesize if the database reliably reported file sizes
-            if (not Path(local_path).is_file()) and (status != "SKIPPED"):
-                status = "ERROR"
-                msg = "File was not downloaded"
+            # Check if file exists
+            if not local_path.is_file() and status != 'SKIPPED':
+                status = 'ERROR'
+                msg = 'File was not downloaded'
                 url = data_url
 
         except requests.HTTPError as err:
-            status = "ERROR"
-            msg = "HTTPError: {0}".format(err)
+            status = 'ERROR'
+            msg = 'HTTPError: {0}'.format(err)
             url = data_url
 
         return status, msg, url
 
     def _download_files(self, products, base_dir, *, flat=False, cache=True, verbose=True):
         """
-        Takes an `~astropy.table.Table` of data products and downloads them into the directory given by base_dir.
+        Downloads files listed in an `~astropy.table.Table` of data products to a specified directory.
 
         Parameters
         ----------
@@ -392,120 +469,98 @@ class MastMissionsClass(MastQueryWithLogin):
         base_dir : str
             Directory in which files will be downloaded.
         flat : bool
-            Default is False.  If set to True, no subdirectories will be made for the
-            downloaded files.
+            Default is False.  If True, all files are downloaded directly to `base_dir`, and no subdirectories
+            will be created.
         cache : bool
-            Default is True. If file is found on disk it will not be downloaded again.
+            Default is True. If file is found on disk, it will not be downloaded again.
         verbose : bool, optional
-            Default True. Whether to show download progress in the console.
+            Default is True. Whether to show download progress in the console.
 
         Returns
         -------
         response : `~astropy.table.Table`
+            Table containing download results for each data product file.
         """
 
-        manifest_array = []
+        manifest_entries = []
+        base_dir = Path(base_dir)
+
         for data_product in products:
 
-            # create the local file download path
-            if not flat:
-                local_path = Path(base_dir, data_product['dataset'])
-                local_path.mkdir(parents=True, exist_ok=True)
-            else:
-                local_path = base_dir
-            local_path = Path(local_path) / Path(data_product['filename']).name
+            # Determine local path for each file
+            local_path = base_dir / data_product['dataset'] if not flat else base_dir
+            local_path.mkdir(parents=True, exist_ok=True)
+            local_file_path = local_path / Path(data_product['filename']).name
 
-            # download the files
-            status, msg, url = self.download_file(data_product['uri'], local_path=local_path,
-                                                  cache=cache, verbose=verbose)
+            # Download files and record status
+            status, msg, url = self.download_file(data_product['uri'],
+                                                  local_path=local_file_path,
+                                                  cache=cache,
+                                                  verbose=verbose)
+            manifest_entries.append([local_path, status, msg or '', url or ''])
 
-            manifest_array.append([local_path, status, msg, url])
-
-        manifest = Table(rows=manifest_array, names=('Local Path', 'Status', 'Message', "URL"))
-
+        manifest = Table(rows=manifest_entries, names=('Local Path', 'Status', 'Message', 'URL'))
         return manifest
 
     def download_products(self, products, *, download_dir=None, flat=False,
                           cache=True, extension=None, verbose=True, **filters):
         """
-        Download data products.
-        If cloud access is enabled, files will be downloaded from the cloud if possible.
+        Download specified data products.
 
         Parameters
         ----------
         products : str, list, `~astropy.table.Table`
-            Either a single or list of dataset IDs (as can be given to `get_product_list`),
-            or a Table of products (as is returned by `get_product_list`)
-        download_dir : str, optional
-            Optional.  Directory to download files to.  Defaults to current directory.
+            Either a single or list of dataset IDs (e.g., as input for `get_product_list`),
+            or a Table of products (e.g., as output from `get_product_list`)
+        download_dir : str or Path, optional
+            Directory for file downloads.  Defaults to current directory.
         flat : bool, optional
-            Default is False.  If set to True, and download_dir is specified, it will put
-            all files into download_dir without subdirectories.  Or if set to True and
-            download_dir is not specified, it will put files in the current directory,
-            again with no subdirs.  The default of False puts files into the standard
-            directory structure of "mastDownload/<obs_collection>/<obs_id>/".  If
-            curl_flag=True, the flat flag has no effect, as astroquery does not control
-            how MAST generates the curl download script.
+            Default is False. If False, puts files into the standard
+            directory structure of "mastDownload/<mission>/<dataset ID>/".
+            If True, places files directly in `download_dir` without subdirectories.
         cache : bool, optional
-            Default is True. If file is found on disc it will not be downloaded again.
-            Note: has no affect when downloading curl script.
-        curl_flag : bool, optional
-            Default is False.  If true instead of downloading files directly, a curl script
-            will be downloaded that can be used to download the data files at a later time.
-        extension : string or array, optional
-            Default None. Option to filter by file extension.
+            Default is True. If file is found on disc, it will not be downloaded again.
+        extension : string or list, optional
+            Default is None. Filter by file extension.
         verbose : bool, optional
-            Default True. Whether to show download progress in the console.
+            Default is True. Whether to show download progress in the console.
         **filters :
-            Filters to be applied.  Valid filters are all products fields returned by
-            ``get_metadata("products")`` and 'extension' which is the desired file extension.
-            The Column Name (or 'extension') is the keyword, with the argument being one or
-            more acceptable values for that parameter.
-            Filter behavior is AND between the filters and OR within a filter set.
-            For example: productType="SCIENCE",extension=["fits","jpg"]
+            Column-based filters to be applied.
+            Each keyword corresponds to a column name in the table, with the argument being one or more
+            acceptable values for that column. AND logic is applied between filters, OR logic within
+            each filter set.
+            For example: type="science", extension=["fits","jpg"]
 
         Returns
         -------
-        response : `~astropy.table.Table`
-            The manifest of files downloaded, or status of files on disk if curl option chosen.
+        manifest : `~astropy.table.Table`
+            A table manifest showing downloaded file locations and statuses.
         """
-        # If the products list is a row we need to cast it as a table
-        if isinstance(products, Row):
+        # Ensure `products` is a Table, collecting products if necessary
+        if isinstance(products, (str, list)):
+            products = [products] if isinstance(products, str) else products
+            products = Table(np.vstack([self.get_product_list(oid) for oid in products]), masked=True)
+        elif isinstance(products, Row):
             products = Table(products, masked=True)
 
-        # If the products list is not already a table of products we need to
-        # get the products and filter them appropriately
-        if not isinstance(products, Table):
-
-            if isinstance(products, str):
-                products = [products]
-
-            # collect list of products
-            product_lists = []
-            for oid in products:
-                product_lists.append(self.get_product_list(oid))
-
-            products = np.vstack(product_lists)
-
-        # apply filters
+        # Apply filters
         products = self.filter_products(products, extension=extension, **filters)
 
-        # remove duplicate products
+        # Remove duplicates
         products = utils.remove_duplicate_products(products, 'uri')
 
         if not len(products):
             warnings.warn("No products to download.", NoResultsWarning)
             return
 
-        # set up the download directory and paths
-        download_dir = '.' if not download_dir else download_dir
+        # Set up base directory for downloads
+        download_dir = Path(download_dir or '.')
+        base_dir = download_dir if flat else download_dir / 'mastDownload' / self.mission
 
-        if flat:
-            base_dir = download_dir
-        else:
-            base_dir = Path(download_dir, "mastDownload")
+        # Download files
         manifest = self._download_files(products,
-                                        base_dir=base_dir, flat=flat,
+                                        base_dir=base_dir,
+                                        flat=flat,
                                         cache=cache,
                                         verbose=verbose)
 
@@ -521,22 +576,27 @@ class MastMissionsClass(MastQueryWithLogin):
         response : `~astropy.table.Table` that contains columns names, types  and their descriptions
         """
 
-        url = f"{conf.server}/search/util/api/v0.1/column_list?mission={self.mission}"
+        if not self.columns.get(self.mission):
+            url = f"{conf.server}/search/util/api/v0.1/column_list?mission={self.mission}"
 
-        try:
-            results = requests.get(url)
-            results = results.json()
-            rows = []
-            for result in results:
-                result.pop('field_name')
-                result.pop('queryable')
-                result.pop('indexed')
-                result.pop('default_output')
-                rows.append((result['column_name'], result['qual_type'], result['description']))
-            data_table = Table(rows=rows, names=('name', 'data_type', 'description'))
-            return data_table
-        except Exception:
-            raise Exception(f"Error occurred while trying to get column list for mission {self.mission}")
+            try:
+                resp = requests.get(url)
+                resp.raise_for_status()
+
+                # Parse JSON and extract necessary info
+                results = resp.json()
+                rows = [
+                    (result['column_name'], result['qual_type'], result['description'])
+                    for result in results
+                ]
+
+                # Create Table with parsed data
+                col_table = Table(rows=rows, names=('name', 'data_type', 'description'))
+                self.columns[self.mission] = col_table
+            except Exception:
+                raise Exception(f"Error occurred while trying to get column list for mission {self.mission}")
+
+        return self.columns[self.mission]
 
 
 MastMissions = MastMissionsClass()
