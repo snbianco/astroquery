@@ -7,14 +7,14 @@ This module contains methods for searching MAST missions.
 """
 
 import difflib
-import numpy as np
-import requests
 import warnings
 from pathlib import Path
 from urllib.parse import quote
 
 import astropy.units as u
 import astropy.coordinates as coord
+import numpy as np
+import requests
 from astropy.table import Table, Row
 
 from astroquery.utils import commons, async_to_sync
@@ -486,7 +486,6 @@ class MastMissionsClass(MastQueryWithLogin):
         base_dir = Path(base_dir)
 
         for data_product in products:
-
             # Determine local path for each file
             local_path = base_dir / data_product['dataset'] if not flat else base_dir
             local_path.mkdir(parents=True, exist_ok=True)
@@ -499,6 +498,7 @@ class MastMissionsClass(MastQueryWithLogin):
                                                   verbose=verbose)
             manifest_entries.append([local_path, status, msg or '', url or ''])
 
+        # Return manifest as Astropy Table
         manifest = Table(rows=manifest_entries, names=('Local Path', 'Status', 'Message', 'URL'))
         return manifest
 

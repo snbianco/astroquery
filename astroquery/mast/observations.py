@@ -19,7 +19,7 @@ from requests import HTTPError
 import astropy.units as u
 import astropy.coordinates as coord
 
-from astropy.table import Table, Row, unique, vstack
+from astropy.table import Table, Row, vstack
 from astroquery import log
 from astroquery.mast.cloud import CloudAccess
 
@@ -965,30 +965,6 @@ class ObservationsClass(MastQueryWithLogin):
 
         # Query for product URIs
         return self._cloud_connection.get_cloud_uri(data_product, include_bucket, full_url)
-
-    def _remove_duplicate_products(self, data_products):
-        """
-        Removes duplicate data products that have the same dataURI.
-
-        Parameters
-        ----------
-        data_products : `~astropy.table.Table`
-            Table containing products to be checked for duplicates.
-
-        Returns
-        -------
-        unique_products : `~astropy.table.Table`
-            Table containing products with unique dataURIs.
-
-        """
-        number = len(data_products)
-        unique_products = unique(data_products, keys="dataURI")
-        number_unique = len(unique_products)
-        if number_unique < number:
-            log.info(f"{number - number_unique} of {number} products were duplicates. "
-                     f"Only returning {number_unique} unique product(s).")
-
-        return unique_products
 
     def get_unique_product_list(self, observations):
         """

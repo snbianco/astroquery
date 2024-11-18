@@ -319,6 +319,7 @@ class ServiceAPI(BaseQuery):
         response = self._request('POST', request_url, data=catalogs_request, headers=headers, use_json=use_json)
         return response
 
+    @class_or_instance
     def missions_request_async(self, service, params):
         """
         Builds and executes an asynchronous query to the MAST Search API.
