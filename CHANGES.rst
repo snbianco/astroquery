@@ -32,6 +32,14 @@ utils.tap
 
 - Get the cookie associated to the keys JSESSIONID or SESSION due to the tap library release at ESAC. [#3289]
 
+mast
+^^^^
+
+- Added ``resolver`` parameter to query methods to specify the resolver to use when resolving object names to coordinates. [#3292]
+
+- Added ``resolve_all`` parameter to ``MastClass.resolve_object`` to resolve object names and return 
+  coordinates for all available resolvers. [#3292]
+
 
 Infrastructure, Utility and Other Changes and Additions
 -------------------------------------------------------
