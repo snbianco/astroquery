@@ -12,12 +12,12 @@ import warnings
 import os
 import time
 
-from requests import HTTPError, RequestException
-
 import astropy.units as u
 import astropy.coordinates as coord
-
 from astropy.table import Table, Row
+from pyvo.dal import TAPService
+from requests import HTTPError, RequestException
+import requests
 
 from ..utils import commons, async_to_sync
 from ..utils.class_or_instance import class_or_instance
@@ -38,7 +38,7 @@ class CatalogsClass(MastQueryWithLogin):
     Class for querying MAST catalog data.
     """
 
-    def __init__(self):
+    def __init__(self, catalog="hsc", table=None):
 
         super().__init__()
 
@@ -52,6 +52,59 @@ class CatalogsClass(MastQueryWithLogin):
         self._current_connection = None
         self._service_columns = dict()  # Info about columns for Catalogs.MAST services
 
+        self._tap_base_url = "https://masttest.stsci.edu/vo-tap/api/v0.1/"
+        self._tables_by_catalog_cache = dict()
+        # Cache of pyvo TAPService instances per catalog (lowercased key)
+        self._tap_services = {}
+        self._catalogs_cache = self.get_catalogs()['catalog_name'].tolist()
+        # Cache for column metadata fetched via TAP (keyed by (catalog, table))
+        self._column_metadata_cache = {}
+
+        self._catalog = None
+        self._table = None
+        self.catalog = catalog
+        if table:
+            self.table = table
+
+    @property
+    def catalog(self):
+        return self._catalog
+
+    @catalog.setter
+    def catalog(self, catalog):
+        catalog = catalog.lower()
+        self._verify_catalog(catalog)
+
+        # Update internal catalog and table
+        self._catalog = catalog
+
+        # Cache the table list for this catalog if not already done
+        if catalog not in self._tables_by_catalog_cache:
+            self._tables_by_catalog_cache[catalog] = self.get_tables(catalog)
+        table_names = self._tables_by_catalog_cache[catalog]['table_name'].tolist()
+
+        # Pick default table = first one that does NOT start with "tap_schema."
+        default_table = next((t for t in table_names if not t.startswith("tap_schema.")), None)
+
+        # If no valid table found, fallback to the first one
+        if default_table is None:
+            default_table = table_names[0] if table_names else None
+
+        # Only change table if not set yet or invalid for this catalog
+        if not hasattr(self, "_table") or self._table not in table_names:
+            self._table = default_table
+
+    @property    
+    def table(self):
+        return self._table
+    
+    @table.setter
+    def table(self, table):
+        # Setter that updates the service parameters if the table is changed
+        self._verify_table(self.catalog, table)
+        self._table = table
+
+
     def _parse_result(self, response, *, verbose=False):
 
         results_table = self._current_connection._parse_result(response, verbose=verbose)
@@ -61,6 +114,588 @@ class CatalogsClass(MastQueryWithLogin):
                           MaxResultsWarning)
 
         return results_table
+    
+    def _verify_catalog(self, catalog):
+        """
+        Verify that the specified catalog is valid.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be verified.
+
+        Raises
+        ------
+        ValueError
+            If the specified catalog is not valid.
+        """
+        if catalog.lower() not in self._catalogs_cache:
+            closest_match = difflib.get_close_matches(catalog, self._catalogs_cache, n=1)
+            error_msg = (
+                f"Catalog '{catalog}' is not recognized. Did you mean '{closest_match[0]}'?"
+                if closest_match
+                else f"Catalog '{catalog}' is not recognized."
+            )
+            error_msg += " Available catalogs are: " + ", ".join(self._catalogs_cache)
+            raise ValueError(error_msg)
+        
+    def _verify_table(self, catalog, table):
+        """
+        Verify that the specified table is valid for the given catalog.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be verified.
+        table : str
+            The table to be verified.
+
+        Raises
+        ------
+        ValueError
+            If the specified table is not valid for the given catalog.
+        """
+        catalog = catalog.lower()
+        if catalog not in self._tables_by_catalog_cache:
+            self._tables_by_catalog_cache[catalog] = self.get_tables(catalog)
+
+        table_names = self._tables_by_catalog_cache[catalog]['table_name'].tolist()
+        lower_map = {name.lower(): name for name in table_names}
+        if table.lower() not in lower_map:
+            closest_match = difflib.get_close_matches(table, table_names, n=1)
+            error_msg = (
+                f"Table '{table}' is not recognized for catalog '{catalog}'. Did you mean '{closest_match[0]}'?"
+                if closest_match
+                else f"Table '{table}' is not recognized for catalog '{catalog}'."
+            )
+            error_msg += " Available tables are: " + ", ".join(table_names)
+            raise ValueError(error_msg)
+        
+    def _verify_criteria(self, catalog, table, **criteria):
+        """
+        Check that criteria keyword arguments are valid column names for the specified catalog and table.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be queried.
+        table : str
+            The table within the catalog to query.
+        **criteria
+            Keyword arguments representing criteria filters to apply.
+
+        Raises
+        ------
+        InvalidQueryError
+            If a keyword does not match any valid column names, an error is raised that suggests the closest
+            matching column name, if available.
+        """
+        if not criteria:
+            return
+        column_metadata = self.get_column_metadata(catalog, table)
+        col_names = list(column_metadata['name'])
+
+        # Check each criteria argument for validity
+        for kwd in criteria.keys():
+            if kwd not in col_names:
+                closest_match = difflib.get_close_matches(kwd, col_names, n=1)
+                error_msg = (
+                    f"Filter '{kwd}' is not recognized for catalog '{catalog}' and table '{table}'. Did you mean '{closest_match[0]}'?"
+                    if closest_match
+                    else f"Filter '{kwd}' is not recognized for catalog '{catalog}' and table '{table}'."
+                )
+                raise InvalidQueryError(error_msg)
+
+    # ------------------------ Internal helpers for TAP querying ------------------------
+    def _parse_inputs(self, catalog=None, table=None):
+        """
+        Return (catalog, table) applying default attributes, validation, and normalization.
+
+        Parameters
+        ----------
+        catalog : str, optional
+            The catalog to be queried. If None, uses the instance's default catalog.
+        table : str, optional
+            The table within the catalog to query. If None, uses the instance's default table.
+
+        Returns
+        -------
+        tuple
+            A tuple containing the (catalog, table) to be queried.
+        """
+        if not catalog:
+            catalog = self.catalog
+        else:
+            catalog = catalog.lower()
+            self._verify_catalog(catalog)
+
+        if not table:
+            table = self.table
+        else:
+            table = table.lower()
+        #TODO: If the table is not present for the catalog, should we raise an error or default to a valid table? More relevant for default class attribute table
+        self._verify_table(catalog, table)
+
+        return catalog, table
+
+    # ---- Formatting helpers extracted for readability ----
+    def _get_numeric_columns(self, catalog, table):
+        """Return a set of column names with numeric types for a given table.
+        Relies on metadata types to detect numeric columns.
+        """
+        meta = self.get_column_metadata(catalog, table)
+        num_types = (
+            'int', 'integer', 'smallint', 'bigint', 'tinyint',
+            'float', 'double', 'double precision', 'real', 'numeric', 'decimal'
+        )
+        return {
+            n for n, t in zip(meta['name'], meta['data_type'])
+            if isinstance(t, str) and any(nt in t.lower() for nt in num_types)
+        }
+
+    def _quote_sql_string(self, s: str) -> str:
+        """Escape single quotes per SQL (double them)."""
+        return s.replace("'", "''")
+
+    def _parse_numeric_expr(self, s: str):
+        """Parse numeric comparison/range string.
+        Returns one of:
+          - ('between', low, high)
+          - ('cmp', op, num)
+          - None if not a recognized pattern
+        """
+        if not isinstance(s, str):
+            return None
+        import re
+        ss = s.strip()
+        m = re.fullmatch(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\.\.\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", ss)
+        if m:
+            return ('between', m.group(1), m.group(2))
+        m = re.fullmatch(r"(<=|>=|<|>)\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", ss)
+        if m:
+            return ('cmp', m.group(1), m.group(2))
+        return None
+
+    def _format_scalar_predicate(self, col, val, numeric_cols):
+        """Build predicate for a scalar value (handles negation and wildcards)."""
+        if isinstance(val, bool):
+            return f"{col} = {int(val)}"
+        if isinstance(val, str):
+            is_neg = val.startswith('!')
+            sval = val[1:].strip() if is_neg else val
+            if col in numeric_cols:
+                parsed = self._parse_numeric_expr(sval)
+                if parsed is not None:
+                    if parsed[0] == 'between':
+                        expr = f"{col} BETWEEN {parsed[1]} AND {parsed[2]}"
+                    else:
+                        expr = f"{col} {parsed[1]} {parsed[2]}"
+                    return f"NOT ({expr})" if is_neg else expr
+                try:
+                    num = float(sval)
+                    if sval.strip().isdigit():
+                        expr = f"{col} = {int(num)}"
+                    else:
+                        expr = f"{col} = {num}"
+                    return f"NOT ({expr})" if is_neg else expr
+                except Exception:
+                    raise InvalidQueryError(
+                        f"Column '{col}' is numeric; unsupported value '{val}'. Use numbers, comparisons like '<10', or ranges like '5..10'."
+                    )
+            # non-numeric
+            has_wild = ('*' in sval) or ('%' in sval)
+            pattern = self._quote_sql_string(sval.replace('*', '%'))
+            expr = f"{col} LIKE '{pattern}'" if has_wild else f"{col} = '{pattern}'"
+            return f"NOT ({expr})" if is_neg else expr
+        # numerics or others
+        return f"{col} = {val}"
+
+    def _build_numeric_list_predicate(self, col, pos_items, neg_items):
+        """Build predicate for a numeric column list with separated positives and negatives."""
+        # positives: split into simple numbers and complex expressions
+        simple_numbers = []
+        complex_parts = []
+        for v in pos_items:
+            if isinstance(v, (int, float)):
+                simple_numbers.append(v)
+            elif isinstance(v, bool):
+                simple_numbers.append(int(v))
+            elif isinstance(v, str):
+                parsed = self._parse_numeric_expr(v)
+                if parsed is not None:
+                    if parsed[0] == 'between':
+                        complex_parts.append(f"{col} BETWEEN {parsed[1]} AND {parsed[2]}")
+                    else:
+                        complex_parts.append(f"{col} {parsed[1]} {parsed[2]}")
+                else:
+                    try:
+                        num = float(v)
+                        if v.strip().isdigit():
+                            simple_numbers.append(int(num))
+                        else:
+                            simple_numbers.append(num)
+                    except Exception:
+                        raise InvalidQueryError(
+                            f"Column '{col}' is numeric; unsupported value '{v}'. Use numbers, comparisons like '<10', or ranges like '5..10'."
+                        )
+            else:
+                simple_numbers.append(v)
+
+        parts = []
+        if simple_numbers:
+            vals = [str(sn) for sn in simple_numbers]
+            parts.append(f"{col} IN (" + ", ".join(vals) + ")")
+        if complex_parts:
+            parts.extend(complex_parts)
+        if len(parts) == 1:
+            pos_expr = parts[0]
+        elif len(parts) > 1:
+            pos_expr = '(' + ' OR '.join(parts) + ')'
+        else:
+            pos_expr = ''
+
+        # negatives: NOT(complex) or != numeric
+        neg_parts = []
+        for nv in neg_items:
+            parsed = self._parse_numeric_expr(nv)
+            if parsed is not None:
+                if parsed[0] == 'between':
+                    neg_parts.append(f"NOT ({col} BETWEEN {parsed[1]} AND {parsed[2]})")
+                else:
+                    neg_parts.append(f"NOT ({col} {parsed[1]} {parsed[2]})")
+            else:
+                try:
+                    num = float(nv)
+                    if nv.strip().isdigit():
+                        neg_parts.append(f"{col} != {int(num)}")
+                    else:
+                        neg_parts.append(f"{col} != {num}")
+                except Exception:
+                    raise InvalidQueryError(f"Column '{col}' is numeric; unsupported negated value '!{nv}'.")
+
+        if neg_parts and pos_expr:
+            return '(' + ' AND '.join(neg_parts) + ') AND ' + pos_expr
+        if neg_parts:
+            return ' AND '.join(neg_parts)
+        return pos_expr
+
+    def _build_string_list_predicate(self, col, pos_items, neg_items):
+        """Build predicate for a non-numeric column list with separated positives and negatives."""
+        pos_like_parts = []
+        pos_eq_vals = []
+        for v in pos_items:
+            if isinstance(v, bool):
+                pos_eq_vals.append(str(int(v)))
+            elif isinstance(v, str):
+                if ('*' in v) or ('%' in v):
+                    patt = self._quote_sql_string(v.replace('*', '%'))
+                    pos_like_parts.append(f"{col} LIKE '{patt}'")
+                else:
+                    pos_eq_vals.append("'" + self._quote_sql_string(v) + "'")
+            else:
+                pos_eq_vals.append(str(v))
+
+        pos_parts = []
+        if pos_eq_vals:
+            pos_parts.append(f"{col} IN (" + ", ".join(pos_eq_vals) + ")")
+        if pos_like_parts:
+            pos_parts.extend(pos_like_parts)
+        if len(pos_parts) == 1:
+            pos_expr = pos_parts[0]
+        elif len(pos_parts) > 1:
+            pos_expr = '(' + ' OR '.join(pos_parts) + ')'
+        else:
+            pos_expr = ''
+
+        neg_parts = []
+        for nv in neg_items:
+            if ('*' in nv) or ('%' in nv):
+                patt = self._quote_sql_string(nv.replace('*', '%'))
+                neg_parts.append(f"NOT ({col} LIKE '{patt}')")
+            else:
+                neg_parts.append(f"{col} != '" + self._quote_sql_string(nv) + "'")
+
+        if neg_parts and pos_expr:
+            return '(' + ' AND '.join(neg_parts) + ') AND ' + pos_expr
+        if neg_parts:
+            return ' AND '.join(neg_parts)
+        return pos_expr
+
+    def _format_criteria_conditions(self, catalog, table, criteria):
+        """
+        Turn a criteria dict into ADQL WHERE clause expressions, aware of column types.
+
+        - Scalars: equality (strings quoted; booleans -> 0/1; numerics raw).
+        - Strings with wildcards '*' or '%': uses LIKE (converting '*' to '%').
+        - Lists/Tuples: if any string contains wildcard, build OR of LIKEs; otherwise use IN (...).
+        - Numeric columns: support comparison strings ('<10', '>= 5') and ranges ('5..10', inclusive).
+          Empty lists yield a false predicate (1=0).
+        - Negation: a value prefixed with '!' is treated as a negated predicate. For list values, all negations are
+          AND'ed together and combined with the OR of positives: (neg1 AND neg2) AND (pos1 OR pos2 ...).
+
+        Parameters
+        ----------
+        criteria : dict
+            Mapping of column name -> scalar or list of scalars.
+
+        Returns
+        -------
+        list of str
+            ADQL predicate strings (without leading WHERE/AND), suitable for joining with ' AND '.
+        """
+        numeric_cols = self._get_numeric_columns(catalog, table)
+        conditions = []
+        for key, value in criteria.items():
+            # Handle list-like values => IN or OR(LIKE ...)
+            if isinstance(value, (list, tuple)):
+                values = list(value)
+                if len(values) == 0:
+                    conditions.append("1=0")
+                    continue
+                # Separate negatives (prefixed with '!') and positives
+                neg_items = []
+                pos_items = []
+                for v in values:
+                    if isinstance(v, str) and v.startswith('!'):
+                        neg_items.append(v[1:].strip())
+                    else:
+                        pos_items.append(v)
+
+                if key in numeric_cols:
+                    expr = self._build_numeric_list_predicate(key, pos_items, neg_items)
+                    if expr:
+                        conditions.append(expr)
+                else:
+                    expr = self._build_string_list_predicate(key, pos_items, neg_items)
+                    if expr:
+                        conditions.append(expr)
+            else:
+                conditions.append(self._format_scalar_predicate(key, value, numeric_cols))
+        return conditions
+
+    def _run_tap_query(self, catalog, adql):
+        """
+        Run a TAP query against the specified catalog.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be queried.
+        adql : str
+            The ADQL query string.
+
+        Returns
+        -------
+        response : `~astropy.table.Table`
+            The result of the TAP query as an Astropy Table.
+        """
+        tap = self._get_tap_service(catalog)
+        result = tap.search(adql)
+        return result.to_table()
+
+    def _get_tap_service(self, catalog):
+        """Return a cached TAPService for a catalog (creates once per catalog)."""
+        key = catalog.lower()
+        svc = self._tap_services.get(key)
+        if svc is None:
+            print('Creating new TAPService for catalog:', key)
+            svc = TAPService(self._tap_base_url + key)
+            self._tap_services[key] = svc
+        return svc
+
+    def clear_tap_service_cache(self, catalog=None):
+        """Clear cached TAPService instances. If catalog is provided, clear only that one."""
+        if catalog is None:
+            self._tap_services.clear()
+        else:
+            self._tap_services.pop(catalog.lower(), None)
+    
+    def get_catalogs(self):
+        """
+        Return a list of available Catalogs.MAST catalogs.
+
+        Returns
+        -------
+        response : list of str
+            A list of available Catalogs.MAST catalogs.
+        """
+        # If already cached, use it directly
+        if getattr(self, "_catalogs_cache", None):
+            return Table([self._catalogs_cache], names=('catalog_name',))
+        
+        # Otherwise, fetch from the TAP service
+        url = "https://masttest.stsci.edu/vo-tap/api/v0.1/openapi.json"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+        # Extract catalog enumeration
+        catalog_enum = data["components"]["schemas"]["CatalogName"]["enum"]
+
+        # Cache the results
+        self._catalogs_cache = catalog_enum
+
+        # Build an Astropy Table to hold the results
+        catalog_table = Table([catalog_enum], names=('catalog_name',))
+        return catalog_table
+
+    def get_tables(self, catalog=None):
+        """
+        For a given Catalogs.MAST catalog, return a list of available tables.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be queried.
+
+        Returns
+        -------
+        response : list of str
+            A list of available tables for the specified catalog.
+        """
+        # If no catalog specified, use the class attribute
+        if not catalog:
+            catalog = self.catalog
+        else:
+            catalog = catalog.lower()
+            self._verify_catalog(catalog)
+
+        if catalog in self._tables_by_catalog_cache:
+            return self._tables_by_catalog_cache[catalog]
+
+        tap = self._get_tap_service(catalog)
+        tables = tap.tables
+        names = [t.name for t in tables]
+        descriptions = [t.description for t in tables]
+        
+        # Create an Astropy Table to hold the results
+        result_table = Table([names, descriptions], names=('table_name', 'description'))
+        self._tables_by_catalog_cache[catalog] = result_table
+        return result_table
+    
+    def get_column_metadata(self, catalog, table):
+        """
+        For a given Catalogs.MAST catalog and table, return metadata about the table.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be queried.
+        table : str
+            The table within the catalog to get metadata for.
+        Returns
+        -------
+        response : `~astropy.table.Table`
+            A table containing metadata about the specified table, including column names, data types, and descriptions.
+        """
+        catalog, table = self._parse_inputs(catalog, table)
+        key = (catalog, table)
+        if key in self._column_metadata_cache:
+            return self._column_metadata_cache[key]
+
+        tap = self._get_tap_service(catalog)
+        tap_table = next((t for name, t in tap.tables.items() if name.lower() == table.lower()), None)
+
+        # Extract column metadata
+        col_names = [col.name for col in tap_table.columns]
+        # Some pyvo versions store datatype differently; fall back gracefully
+        col_datatypes = []
+        for col in tap_table.columns:
+            try:
+                col_datatypes.append(col.datatype._content)
+            except AttributeError:
+                # Fallback: str(col.datatype) or None
+                col_datatypes.append(getattr(col.datatype, '_content', str(col.datatype)))
+        col_units = [col.unit for col in tap_table.columns]
+        col_ucds = [col.ucd for col in tap_table.columns]
+        col_descriptions = [col.description for col in tap_table.columns]
+
+        # Create an Astropy Table to hold the metadata
+        metadata_table = Table([col_names, col_datatypes, col_units, col_ucds, col_descriptions],
+                               names=('name', 'data_type', 'unit', 'ucd', 'description'))
+
+        # Cache and return
+        self._column_metadata_cache[key] = metadata_table
+        return metadata_table
+    
+    def query_criteria_tap(self, catalog, table, coordinates=None, objectname=None, radius=0.2*u.deg, resolver=None, **criteria):
+        """
+        Query a Catalogs.MAST catalog table using criteria filters via TAP.
+
+        Parameters
+        ----------
+        catalog : str
+            The catalog to be queried.
+        table : str
+            The table within the catalog to query.
+        coordinates : str or `~astropy.coordinates` object, optional
+            The target around which to search. It may be specified as a string (e.g., '350 -80') or as an Astropy coordinates object.
+        objectname : str, optional
+            The name of the object to resolve and search around.
+        radius : str or `~astropy.units.Quantity` object, optional
+            The search radius around the target coordinates or object. Default 0.2 degrees.
+        **criteria
+            Keyword arguments representing criteria filters to apply.
+
+                Criteria syntax
+                ----------------
+                - Strings support wildcards using '*' (converted to SQL '%') and '%'.
+                - Lists are combined with OR for positive values; empty lists yield no matches.
+                - Numeric columns support comparison operators ('<', '<=', '>', '>=') and inclusive ranges using
+                    the syntax 'low..high' (e.g., '5..10'). Mixed lists of numbers and comparisons are OR-combined.
+                - Negation: Prefix any value with '!' to negate that predicate. For list inputs, all negated values
+                    for the same column are AND-combined, then ANDed with the OR of the positive values:
+                        (neg1 AND neg2 AND ...) AND (pos1 OR pos2 OR ...).
+
+                Examples
+                --------
+                - file_suffix=['A', 'B', '!C'] -> (file_suffix != 'C') AND (file_suffix IN ('A', 'B'))
+                - size=['!14400', '<20000'] -> (size != 14400) AND (size < 20000)
+
+        Returns
+        -------
+        response : `~astropy.table.Table`
+            A table containing the query results.
+        """
+        catalog, table = self._parse_inputs(catalog, table)
+        self._verify_criteria(catalog, table, **criteria)
+
+        # If positional info supplied delegate to region query for DRYness
+        if objectname or coordinates:
+            coordinates = utils.parse_input_location(coordinates=coordinates,
+                                                     objectname=objectname,
+                                                     resolver=resolver)
+            return self.query_region_tap(coordinates, radius=radius, catalog=catalog, table=table, **criteria)
+
+        adql = f'SELECT * FROM {table} '
+        if criteria:
+            conditions = self._format_criteria_conditions(catalog, table, criteria)
+            adql += 'WHERE ' + ' AND '.join(conditions)
+        return self._run_tap_query(catalog, adql)
+    
+    def query_region_tap(self, coordinates, radius=0.2*u.deg, catalog='tic', table="dbo.catalogrecord", **criteria):
+        catalog, table = self._parse_inputs(catalog, table)
+        self._verify_criteria(catalog, table, **criteria)
+
+        # Add positional constraint
+        coordinates = commons.parse_coordinates(coordinates, return_frame='icrs')
+        radius = coord.Angle(radius, u.deg)  # If radius is just a number we assume degrees
+        adql = (f'SELECT * FROM {table.lower()} WHERE CONTAINS(POINT(\'ICRS\', ra, dec), '
+                f'CIRCLE(\'ICRS\', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})) = 1 ')
+
+        # Add additional constraints
+        if criteria:
+            conditions = self._format_criteria_conditions(catalog, table, criteria)
+            adql += 'AND ' + ' AND '.join(conditions)
+
+        return self._run_tap_query(catalog, adql)
+    
+    def query_object_tap(self, objectname, radius=0.2*u.deg, catalog='tic', table="dbo.catalogrecord", resolver=None, **criteria):
+        self._verify_catalog(catalog)
+        self._verify_table(catalog, table)
+        self._verify_criteria(catalog, table, **criteria)
+        coordinates = utils.resolve_object(objectname, resolver=resolver)
+        return self.query_region_tap(coordinates, radius=radius, catalog=catalog, table=table, **criteria)
 
     def _get_service_col_config(self, catalog, release='dr2', table='mean'):
         """
