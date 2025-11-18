@@ -9,17 +9,20 @@ This module contains various methods for querying MAST collections such as catal
 import difflib
 import warnings
 import re
+import os
+import time
 from collections.abc import Iterable
 
 import astropy.units as u
 import astropy.coordinates as coord
 import requests
-from astropy.table import Table
+from astropy.table import Table, Row
 from regions import CircleSkyRegion, PolygonSkyRegion
 
 from astroquery import log
 from ..utils import async_to_sync
 from ..exceptions import InputWarning, InvalidQueryError, MaxResultsWarning
+from ..utils.class_or_instance import class_or_instance
 
 from . import utils
 from .catalog_collection import CatalogCollection
@@ -43,13 +46,14 @@ class CatalogsClass(MastQueryWithLogin):
 
         services = {"panstarrs": {"path": "panstarrs/{data_release}/{table}.json",
                                   "args": {"data_release": "dr2", "table": "mean"}}}
-        self._catalogs_mast_search_options = ['columns', 'sort_by', 'table', 'data_release']
+        # TODO: Implement sort_by and sort_desc
+        #self._catalogs_mast_search_options = ['columns', 'sort_by', 'table', 'data_release']
 
         self._service_api_connection.set_service_params(services, "catalogs", True)
 
-        self.catalog_limit = None
+        #self.catalog_limit = None
         self._current_connection = None
-        self._service_columns = dict()  # Info about columns for Catalogs.MAST services
+        #self._service_columns = dict()  # Info about columns for Catalogs.MAST services
 
 
         self._no_longer_supported_collections = ['ctl', 'diskdetective', 'galex', 'plato']
@@ -64,10 +68,17 @@ class CatalogsClass(MastQueryWithLogin):
 
     @property
     def collection(self):
+        """
+        The current MAST collection to be queried.
+        """
         return self._collection
 
     @collection.setter
     def collection(self, collection):
+        """
+        Setter that creates a CatalogCollection object when the collection is changed and updates
+        the catalog accordingly.
+        """
         collection_obj = self._get_collection_obj(collection)
         self._collection = collection_obj
 
@@ -77,15 +88,21 @@ class CatalogsClass(MastQueryWithLogin):
 
     @property    
     def catalog(self):
+        """
+        The current catalog within the MAST collection.
+        """
         return self._catalog
     
     @catalog.setter
     def catalog(self, catalog):
-        # Setter that updates the service parameters if the catalog is changed
+        """
+        Setter that verifies that the catalog is valid for the current collection.
+        """
         self.collection._verify_catalog(catalog)
         log.debug(f"Set catalog to: {catalog}")
         self._catalog = catalog
 
+    @class_or_instance
     def get_collections(self):
         """
         Return a list of available collections from MAST.
@@ -116,6 +133,7 @@ class CatalogsClass(MastQueryWithLogin):
         collection_table = Table([collection_enum], names=('collection_name',))
         return collection_table
 
+    @class_or_instance
     def get_catalogs(self, collection=None):
         """
         For a given Catalogs.MAST collection, return a list of available catalogs.
@@ -134,6 +152,7 @@ class CatalogsClass(MastQueryWithLogin):
         collection_obj = self._get_collection_obj(collection) if collection else self.collection
         return collection_obj.catalogs
     
+    @class_or_instance
     def get_catalog_metadata(self, collection=None, catalog=None):
         """
         For a given Catalogs.MAST collection and catalog, return metadata about the catalog.
@@ -153,8 +172,10 @@ class CatalogsClass(MastQueryWithLogin):
         collection_obj, catalog = self._parse_inputs(collection, catalog)
         return collection_obj.get_catalog_metadata(catalog)['column_metadata']
     
-    def query_criteria_tap(self, collection=None, *, catalog=None, coordinates=None, region=None, objectname=None, 
-                           radius=0.2*u.deg, resolver=None, limit=5000, offset=0, count_only=False, select_cols=None, **criteria):
+    @class_or_instance
+    def query_criteria(self, collection=None, *, catalog=None, coordinates=None, region=None, objectname=None, 
+                       radius=0.2*u.deg, resolver=None, limit=5000, offset=0, count_only=False, select_cols=None, 
+                       sort_by=None, sort_desc=False, **criteria):
         """
         Query a MAST catalog using criteria filters via TAP.
 
@@ -182,6 +203,10 @@ class CatalogsClass(MastQueryWithLogin):
             If True, only return the count of matching records instead of the records themselves. Default is False.
         select_cols : list of str, optional
             List of column names to include in the result. If None or empty, all columns are returned.
+        sort_by : str or list of str, optional
+            Column name(s) to sort the results by.
+        sort_desc : bool or list of bool, optional
+            If True, sort in descending order. If a list, must match length of `sort_by`. Default is False (ascending).
         **criteria
             Keyword arguments representing criteria filters to apply.
 
@@ -234,6 +259,12 @@ class CatalogsClass(MastQueryWithLogin):
                 radius = coord.Angle(radius, u.deg)  # If radius is just a number we assume degrees
                 adql_region = f'CIRCLE(\'ICRS\', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})'
 
+            region_types = ['POLYGON', 'CIRCLE']
+            for region_type in region_types:
+                if region_type in adql_region and region_type not in collection_obj.supported_adql_functions:
+                    raise InvalidQueryError(f"Catalog '{catalog}' in collection '{collection_obj.name} '"
+                                             "does not support ADQL region type '{region_type}'.")
+
             # Get RA/Dec column names
             ra_col = collection_obj.get_catalog_metadata(catalog)['ra_column']
             dec_col = collection_obj.get_catalog_metadata(catalog)['dec_column']
@@ -247,19 +278,40 @@ class CatalogsClass(MastQueryWithLogin):
             else:
                 adql += 'WHERE ' + ' AND '.join(conditions)
 
+        # Add sorting if specified
+        if sort_by:
+            # Add ORDER BY clause
+            if isinstance(sort_by, str):
+                sort_by = [sort_by]
+            if isinstance(sort_desc, bool):
+                sort_desc = [sort_desc]
+
+            if len(sort_desc) not in [1, len(sort_by)]:
+                raise InvalidQueryError("Length of 'sort_desc' must be 1 or equal to length of 'sort_by'.")
+            if len(sort_desc) == 1:
+                sort_desc = sort_desc * len(sort_by)
+
+            sort_adql = ''
+            for col in sort_by:
+                if col not in collection_obj.get_catalog_metadata(catalog)['column_metadata']['name'].tolist():
+                    raise InvalidQueryError(f"Sort column '{col}' not found in catalog '{catalog}'.")
+                sort_adql += f"{col} " + ("DESC" if sort_desc[sort_by.index(col)] else "ASC") + ", "
+                
+            adql += f'ORDER BY {sort_adql.rstrip(", ")} '
         result = collection_obj.run_tap_query(adql)
 
         if count_only:
             return result['count_all'][0]
         return result
     
-    def query_region_tap(self, coordinates=None, *, radius=0.2*u.deg, collection=None, catalog=None, 
+    @class_or_instance
+    def query_region(self, coordinates=None, *, radius=0.2*u.deg, collection=None, catalog=None, 
                          region=None, limit=5000, offset=0, count_only=False, select_cols=None, **criteria):        
         # Must specify one of region or coordinates
         if region is None and coordinates is None:
             raise InvalidQueryError('Must specify either `region` or `coordinates`.')
         
-        return self.query_criteria_tap(collection=collection,
+        return self.query_criteria(collection=collection,
                                        catalog=catalog,
                                        coordinates=coordinates,
                                        region=region,
@@ -270,9 +322,10 @@ class CatalogsClass(MastQueryWithLogin):
                                        select_cols=select_cols,
                                        **criteria)
 
-    def query_object_tap(self, objectname, *, radius=0.2*u.deg, collection=None, catalog=None, resolver=None,
+    @class_or_instance
+    def query_object(self, objectname, *, radius=0.2*u.deg, collection=None, catalog=None, resolver=None,
                          limit=5000, offset=0, count_only=False, select_cols=None, **criteria):
-        return self.query_criteria_tap(collection=collection,
+        return self.query_criteria(collection=collection,
                                        catalog=catalog,
                                        objectname=objectname,
                                        radius=radius,
@@ -417,10 +470,10 @@ class CatalogsClass(MastQueryWithLogin):
         """
         # Case 1: region is a string (e.g. STC-S syntax)
         if isinstance(region, str):
-            region = region.strip().lower()
-            parts = region.split()
+            parts = region.strip().lower().split()
+            shape = parts[0]
 
-            if parts[0] == 'polygon':
+            if shape == 'polygon':
                 # Handle POLYGON (with or without coord frame)
                 try:
                     float(parts[1])  # Check if next token is numeric
@@ -428,15 +481,15 @@ class CatalogsClass(MastQueryWithLogin):
                 except ValueError:
                     point_parts = parts[2:]  # skip frame name if present
                 point_string = ','.join(point_parts)
-                adql_region = f"POLYGON('ICRS',{point_string})"
-            elif parts[0] == 'circle':
+                return f"POLYGON('ICRS',{point_string})"
+            elif shape == 'circle':
                 # Handle CIRCLE (with or without coord frame)
                 try:
                     float(parts[1])
                     ra, dec, radius = parts[1], parts[2], parts[3]
                 except ValueError:
                     ra, dec, radius = parts[2], parts[3], parts[4]
-                adql_region = f"CIRCLE('ICRS',{ra},{dec},{radius})"
+                return f"CIRCLE('ICRS',{ra},{dec},{radius})"
             else:
                 raise ValueError(f"Unrecognized region string: {region}")
 
@@ -444,29 +497,23 @@ class CatalogsClass(MastQueryWithLogin):
         elif isinstance(region, CircleSkyRegion):
             center = region.center.icrs
             radius = region.radius.to(u.deg).value
-            adql_region = (
-                f"CIRCLE('ICRS',{center.ra.deg},{center.dec.deg},{radius})"
-            )
+            return f"CIRCLE('ICRS',{center.ra.deg},{center.dec.deg},{radius})"
         elif isinstance(region, PolygonSkyRegion):
             verts = region.vertices.icrs
             point_string = ','.join(f"{v.ra.deg},{v.dec.deg}" for v in verts)
-            adql_region = f"POLYGON('ICRS',{point_string})"
+            return f"POLYGON('ICRS',{point_string})"
 
         # Case 3: region is an iterable of coordinate pairs
         elif isinstance(region, Iterable):
             # Expect something like [(ra1, dec1), (ra2, dec2), ...]
             try:
-                flat_points = [float(x) for point in region for x in point]
+                points = [float(x) for point in region for x in point]
             except Exception as e:
                 raise ValueError(f"Invalid iterable region format: {region}") from e
-
-            point_string = ','.join(str(x) for x in flat_points)
-            adql_region = f"POLYGON('ICRS',{point_string})"
+            return f"POLYGON('ICRS',{','.join(str(x) for x in points)})"
 
         else:
             raise TypeError(f"Unsupported region type: {type(region)}")
-
-        return adql_region
     
     # ---- Formatting helpers extracted for readability ----
     def _get_numeric_columns(self, catalog, table):
@@ -476,19 +523,19 @@ class CatalogsClass(MastQueryWithLogin):
         """
         meta = self.get_catalog_metadata(catalog, table)
         num_types = (
-            'int', 'integer', 'smallint', 'bigint', 'tinyint',
+            'int', 'integer', 'smallint', 'bigint', 'long',
             'float', 'double', 'double precision', 'real', 'numeric', 'decimal'
         )
         return {
-            n for n, t in zip(meta['name'], meta['data_type'])
-            if isinstance(t, str) and any(nt in t.lower() for nt in num_types)
+            n for n, t in zip(meta["name"], meta["data_type"])
+            if isinstance(t, str) and t.lower() in num_types
         }
 
     def _quote_sql_string(self, s: str) -> str:
         """Escape single quotes per SQL (double them)."""
         return s.replace("'", "''")
 
-    def _parse_numeric_expr(self, s: str):
+    def _parse_numeric_expr(self, col: str, expr: str):
         """
         Parse numeric comparison/range string.
         Returns one of:
@@ -496,48 +543,50 @@ class CatalogsClass(MastQueryWithLogin):
             - ('cmp', op, num)
             - None if not a recognized pattern
         """
-        if not isinstance(s, str):
+        if not isinstance(expr, str):
             return None
-        ss = s.strip()
-        m = re.fullmatch(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\.\.\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", ss)
-        if m:
-            return ('between', m.group(1), m.group(2))
-        m = re.fullmatch(r"(<=|>=|<|>)\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", ss)
-        if m:
-            return ('cmp', m.group(1), m.group(2))
-        return None
+        expr = expr.strip()
+
+        # Check for range (e.g., "5..10")
+        range_match = re.fullmatch(
+            r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\.\.\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)",
+            expr)
+        if range_match:
+            return f"{col} BETWEEN {range_match.group(1)} AND {range_match.group(2)}"
+        
+        # Check for comparison (e.g., "<10", ">=5.5")
+        cmp_match = re.fullmatch(r"(<=|>=|<|>)\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", expr)
+        if cmp_match:
+            return f"{col} {cmp_match.group(1)} {cmp_match.group(2)}"
+        
+        try:
+            return f"{col} = {float(expr)}"
+        except ValueError:
+            raise InvalidQueryError(
+                f"Column '{col}' is numeric; unsupported value '{expr}'. Use numbers, comparisons like '<10', or ranges like '5..10'."
+            )
 
     def _format_scalar_predicate(self, col, val, numeric_cols):
         """Build predicate for a scalar value (handles negation and wildcards)."""
         if isinstance(val, bool):
+            # Booleans stored as integers
             return f"{col} = {int(val)}"
         if isinstance(val, str):
+            # Check for negation
             is_neg = val.startswith('!')
             sval = val[1:].strip() if is_neg else val
+
+            # Strings for numeric columns
             if col in numeric_cols:
-                parsed = self._parse_numeric_expr(sval)
-                if parsed is not None:
-                    if parsed[0] == 'between':
-                        expr = f"{col} BETWEEN {parsed[1]} AND {parsed[2]}"
-                    else:
-                        expr = f"{col} {parsed[1]} {parsed[2]}"
-                    return f"NOT ({expr})" if is_neg else expr
-                try:
-                    num = float(sval)
-                    if sval.strip().isdigit():
-                        expr = f"{col} = {int(num)}"
-                    else:
-                        expr = f"{col} = {num}"
-                    return f"NOT ({expr})" if is_neg else expr
-                except Exception:
-                    raise InvalidQueryError(
-                        f"Column '{col}' is numeric; unsupported value '{val}'. Use numbers, comparisons like '<10', or ranges like '5..10'."
-                    )
-            # Non-numeric
+                parsed = self._parse_numeric_expr(col, sval)
+                return f"NOT ({parsed})" if is_neg else parsed
+
+            # Non-numeric strings
             has_wild = ('*' in sval) or ('%' in sval)
             pattern = self._quote_sql_string(sval.replace('*', '%'))
             expr = f"{col} LIKE '{pattern}'" if has_wild else f"{col} = '{pattern}'"
             return f"NOT ({expr})" if is_neg else expr
+
         # Numerics or others
         return f"{col} = {val}"
 
@@ -546,31 +595,19 @@ class CatalogsClass(MastQueryWithLogin):
         # Positives: split into simple numbers and complex expressions
         simple_numbers = []
         complex_parts = []
-        for v in pos_items:
-            if isinstance(v, (int, float)):
-                simple_numbers.append(v)
-            elif isinstance(v, bool):
-                simple_numbers.append(int(v))
-            elif isinstance(v, str):
-                parsed = self._parse_numeric_expr(v)
-                if parsed is not None:
-                    if parsed[0] == 'between':
-                        complex_parts.append(f"{col} BETWEEN {parsed[1]} AND {parsed[2]}")
-                    else:
-                        complex_parts.append(f"{col} {parsed[1]} {parsed[2]}")
+        for val in pos_items:
+            if isinstance(val, (int, float)):
+                simple_numbers.append(val)
+            elif isinstance(val, bool):
+                simple_numbers.append(int(val))
+            elif isinstance(val, str):
+                parsed = self._parse_numeric_expr(val)
+                if 'BETWEEN' in parsed or '<' in parsed or '>' in parsed:
+                    complex_parts.append(parsed)
                 else:
-                    try:
-                        num = float(v)
-                        if v.strip().isdigit():
-                            simple_numbers.append(int(num))
-                        else:
-                            simple_numbers.append(num)
-                    except Exception:
-                        raise InvalidQueryError(
-                            f"Column '{col}' is numeric; unsupported value '{v}'. Use numbers, comparisons like '<10', or ranges like '5..10'."
-                        )
+                    simple_numbers.append(float(val))
             else:
-                simple_numbers.append(v)
+                simple_numbers.append(val)
 
         parts = []
         if simple_numbers:
@@ -589,20 +626,10 @@ class CatalogsClass(MastQueryWithLogin):
         neg_parts = []
         for nv in neg_items:
             parsed = self._parse_numeric_expr(nv)
-            if parsed is not None:
-                if parsed[0] == 'between':
-                    neg_parts.append(f"NOT ({col} BETWEEN {parsed[1]} AND {parsed[2]})")
-                else:
-                    neg_parts.append(f"NOT ({col} {parsed[1]} {parsed[2]})")
+            if 'BETWEEN' in parsed or '<' in parsed or '>' in parsed:
+                neg_parts.append(f"NOT ({parsed})")
             else:
-                try:
-                    num = float(nv)
-                    if nv.strip().isdigit():
-                        neg_parts.append(f"{col} != {int(num)}")
-                    else:
-                        neg_parts.append(f"{col} != {num}")
-                except Exception:
-                    raise InvalidQueryError(f"Column '{col}' is numeric; unsupported negated value '!{nv}'.")
+                neg_parts.append(parsed.replace('=', '!='))
 
         if neg_parts and pos_expr:
             return '(' + ' AND '.join(neg_parts) + ') AND ' + pos_expr
@@ -1113,197 +1140,197 @@ class CatalogsClass(MastQueryWithLogin):
     #     return self._current_connection.service_request_async(service, params, pagesize=pagesize, page=page,
     #                                                           use_json=use_json)
 
-    # @class_or_instance
-    # def query_hsc_matchid_async(self, match, *, version=3, pagesize=None, page=None):
-    #     """
-    #     Returns all the matches for a given Hubble Source Catalog MatchID.
+    @class_or_instance
+    def query_hsc_matchid_async(self, match, *, version=3, pagesize=None, page=None):
+        """
+        Returns all the matches for a given Hubble Source Catalog MatchID.
 
-    #     Parameters
-    #     ----------
-    #     match : int or `~astropy.table.Row`
-    #         The matchID or HSC entry to return matches for.
-    #     version : int, optional
-    #         The HSC version to match against. Default is v3.
-    #     pagesize : int, optional
-    #         Can be used to override the default pagesize.
-    #         E.g. when using a slow internet connection.
-    #     page : int, optional
-    #         Can be used to override the default behavior of all results being returned to obtain
-    #         one specific page of results.
+        Parameters
+        ----------
+        match : int or `~astropy.table.Row`
+            The matchID or HSC entry to return matches for.
+        version : int, optional
+            The HSC version to match against. Default is v3.
+        pagesize : int, optional
+            Can be used to override the default pagesize.
+            E.g. when using a slow internet connection.
+        page : int, optional
+            Can be used to override the default behavior of all results being returned to obtain
+            one specific page of results.
 
-    #     Returns
-    #     -------
-    #     response : list of `~requests.Response`
-    #     """
+        Returns
+        -------
+        response : list of `~requests.Response`
+        """
 
-    #     self._current_connection = self._portal_api_connection
+        self._current_connection = self._portal_api_connection
 
-    #     if isinstance(match, Row):
-    #         match = match["MatchID"]
-    #     match = str(match)  # np.int64 gives json serializer problems, so stringify right here
+        if isinstance(match, Row):
+            match = match["MatchID"]
+        match = str(match)  # np.int64 gives json serializer problems, so stringify right here
 
-    #     if version == 2:
-    #         service = "Mast.HscMatches.Db.v2"
-    #     else:
-    #         if version not in (3, None):
-    #             warnings.warn("Invalid HSC version number, defaulting to v3.", InputWarning)
-    #         service = "Mast.HscMatches.Db.v3"
+        if version == 2:
+            service = "Mast.HscMatches.Db.v2"
+        else:
+            if version not in (3, None):
+                warnings.warn("Invalid HSC version number, defaulting to v3.", InputWarning)
+            service = "Mast.HscMatches.Db.v3"
 
-    #     params = {"input": match}
+        params = {"input": match}
 
-    #     return self._current_connection.service_request_async(service, params, pagesize=pagesize, page=page)
+        return self._current_connection.service_request_async(service, params, pagesize=pagesize, page=page)
 
-    # @class_or_instance
-    # def get_hsc_spectra_async(self, *, pagesize=None, page=None):
-    #     """
-    #     Returns all Hubble Source Catalog spectra.
+    @class_or_instance
+    def get_hsc_spectra_async(self, *, pagesize=None, page=None):
+        """
+        Returns all Hubble Source Catalog spectra.
 
-    #     Parameters
-    #     ----------
-    #     pagesize : int, optional
-    #         Can be used to override the default pagesize.
-    #         E.g. when using a slow internet connection.
-    #     page : int, optional
-    #         Can be used to override the default behavior of all results being returned to obtain
-    #         one specific page of results.
+        Parameters
+        ----------
+        pagesize : int, optional
+            Can be used to override the default pagesize.
+            E.g. when using a slow internet connection.
+        page : int, optional
+            Can be used to override the default behavior of all results being returned to obtain
+            one specific page of results.
 
-    #     Returns
-    #     -------
-    #     response : list of `~requests.Response`
-    #     """
+        Returns
+        -------
+        response : list of `~requests.Response`
+        """
 
-    #     self._current_connection = self._portal_api_connection
+        self._current_connection = self._portal_api_connection
 
-    #     service = "Mast.HscSpectra.Db.All"
-    #     params = {}
+        return self._current_connection.service_request_async(service="Mast.HscSpectra.Db.All", 
+                                                              params={}, 
+                                                              pagesize=pagesize, 
+                                                              page=page)
 
-    #     return self._current_connection.service_request_async(service, params, pagesize, page)
+    def download_hsc_spectra(self, spectra, *, download_dir=None, cache=True, curl_flag=False):
+        """
+        Download one or more Hubble Source Catalog spectra.
 
-    # def download_hsc_spectra(self, spectra, *, download_dir=None, cache=True, curl_flag=False):
-    #     """
-    #     Download one or more Hubble Source Catalog spectra.
+        Parameters
+        ----------
+        spectra : `~astropy.table.Table` or `~astropy.table.Row`
+            One or more HSC spectra to be downloaded.
+        download_dir : str, optional
+           Specify the base directory to download spectra into.
+           Spectra will be saved in the subdirectory download_dir/mastDownload/HSC.
+           If download_dir is not specified the base directory will be '.'.
+        cache : bool, optional
+            Default is True. If file is found on disc it will not be downloaded again.
+            Note: has no affect when downloading curl script.
+        curl_flag : bool, optional
+            Default is False.  If true instead of downloading files directly, a curl script
+            will be downloaded that can be used to download the data files at a later time.
 
-    #     Parameters
-    #     ----------
-    #     spectra : `~astropy.table.Table` or `~astropy.table.Row`
-    #         One or more HSC spectra to be downloaded.
-    #     download_dir : str, optional
-    #        Specify the base directory to download spectra into.
-    #        Spectra will be saved in the subdirectory download_dir/mastDownload/HSC.
-    #        If download_dir is not specified the base directory will be '.'.
-    #     cache : bool, optional
-    #         Default is True. If file is found on disc it will not be downloaded again.
-    #         Note: has no affect when downloading curl script.
-    #     curl_flag : bool, optional
-    #         Default is False.  If true instead of downloading files directly, a curl script
-    #         will be downloaded that can be used to download the data files at a later time.
+        Returns
+        -------
+        response : list of `~requests.Response`
+        """
 
-    #     Returns
-    #     -------
-    #     response : list of `~requests.Response`
-    #     """
+        # if spectra is not a Table, put it in a list
+        if isinstance(spectra, Row):
+            spectra = [spectra]
 
-    #     # if spectra is not a Table, put it in a list
-    #     if isinstance(spectra, Row):
-    #         spectra = [spectra]
+        # set up the download directory and paths
+        if not download_dir:
+            download_dir = '.'
 
-    #     # set up the download directory and paths
-    #     if not download_dir:
-    #         download_dir = '.'
+        if curl_flag:  # don't want to download the files now, just the curl script
 
-    #     if curl_flag:  # don't want to download the files now, just the curl script
+            download_file = "mastDownload_" + time.strftime("%Y%m%d%H%M%S")
 
-    #         download_file = "mastDownload_" + time.strftime("%Y%m%d%H%M%S")
+            url_list = []
+            path_list = []
+            for spec in spectra:
+                if spec['SpectrumType'] < 2:
+                    url_list.append('https://hla.stsci.edu/cgi-bin/getdata.cgi?config=ops&dataset={0}'
+                                    .format(spec['DatasetName']))
 
-    #         url_list = []
-    #         path_list = []
-    #         for spec in spectra:
-    #             if spec['SpectrumType'] < 2:
-    #                 url_list.append('https://hla.stsci.edu/cgi-bin/getdata.cgi?config=ops&dataset={0}'
-    #                                 .format(spec['DatasetName']))
+                else:
+                    url_list.append('https://hla.stsci.edu/cgi-bin/ecfproxy?file_id={0}'
+                                    .format(spec['DatasetName']) + '.fits')
 
-    #             else:
-    #                 url_list.append('https://hla.stsci.edu/cgi-bin/ecfproxy?file_id={0}'
-    #                                 .format(spec['DatasetName']) + '.fits')
+                path_list.append(download_file + "/HSC/" + spec['DatasetName'] + '.fits')
 
-    #             path_list.append(download_file + "/HSC/" + spec['DatasetName'] + '.fits')
+            description_list = [""]*len(spectra)
+            producttype_list = ['spectrum']*len(spectra)
 
-    #         description_list = [""]*len(spectra)
-    #         producttype_list = ['spectrum']*len(spectra)
+            service = "Mast.Bundle.Request"
+            params = {"urlList": ",".join(url_list),
+                      "filename": download_file,
+                      "pathList": ",".join(path_list),
+                      "descriptionList": list(description_list),
+                      "productTypeList": list(producttype_list),
+                      "extension": 'curl'}
 
-    #         service = "Mast.Bundle.Request"
-    #         params = {"urlList": ",".join(url_list),
-    #                   "filename": download_file,
-    #                   "pathList": ",".join(path_list),
-    #                   "descriptionList": list(description_list),
-    #                   "productTypeList": list(producttype_list),
-    #                   "extension": 'curl'}
+            response = self._portal_api_connection.service_request_async(service, params)
+            bundler_response = response[0].json()
 
-    #         response = self._portal_api_connection.service_request_async(service, params)
-    #         bundler_response = response[0].json()
+            local_path = os.path.join(download_dir, "{}.sh".format(download_file))
+            self._download_file(bundler_response['url'], local_path, head_safe=True, continuation=False)
 
-    #         local_path = os.path.join(download_dir, "{}.sh".format(download_file))
-    #         self._download_file(bundler_response['url'], local_path, head_safe=True, continuation=False)
+            status = "COMPLETE"
+            msg = None
+            url = None
 
-    #         status = "COMPLETE"
-    #         msg = None
-    #         url = None
+            if not os.path.isfile(local_path):
+                status = "ERROR"
+                msg = "Curl could not be downloaded"
+                url = bundler_response['url']
+            else:
+                missing_files = [x for x in bundler_response['statusList'].keys()
+                                 if bundler_response['statusList'][x] != 'COMPLETE']
+                if len(missing_files):
+                    msg = "{} files could not be added to the curl script".format(len(missing_files))
+                    url = ",".join(missing_files)
 
-    #         if not os.path.isfile(local_path):
-    #             status = "ERROR"
-    #             msg = "Curl could not be downloaded"
-    #             url = bundler_response['url']
-    #         else:
-    #             missing_files = [x for x in bundler_response['statusList'].keys()
-    #                              if bundler_response['statusList'][x] != 'COMPLETE']
-    #             if len(missing_files):
-    #                 msg = "{} files could not be added to the curl script".format(len(missing_files))
-    #                 url = ",".join(missing_files)
+            manifest = Table({'Local Path': [local_path],
+                              'Status': [status],
+                              'Message': [msg],
+                              "URL": [url]})
 
-    #         manifest = Table({'Local Path': [local_path],
-    #                           'Status': [status],
-    #                           'Message': [msg],
-    #                           "URL": [url]})
+        else:
+            base_dir = download_dir.rstrip('/') + "/mastDownload/HSC"
 
-    #     else:
-    #         base_dir = download_dir.rstrip('/') + "/mastDownload/HSC"
+            if not os.path.exists(base_dir):
+                os.makedirs(base_dir)
 
-    #         if not os.path.exists(base_dir):
-    #             os.makedirs(base_dir)
+            manifest_array = []
+            for spec in spectra:
 
-    #         manifest_array = []
-    #         for spec in spectra:
+                if spec['SpectrumType'] < 2:
+                    data_url = f'https://hla.stsci.edu/cgi-bin/getdata.cgi?config=ops&dataset={spec["DatasetName"]}'
+                else:
+                    data_url = f'https://hla.stsci.edu/cgi-bin/ecfproxy?file_id={spec["DatasetName"]}.fits'
 
-    #             if spec['SpectrumType'] < 2:
-    #                 data_url = f'https://hla.stsci.edu/cgi-bin/getdata.cgi?config=ops&dataset={spec["DatasetName"]}'
-    #             else:
-    #                 data_url = f'https://hla.stsci.edu/cgi-bin/ecfproxy?file_id={spec["DatasetName"]}.fits'
+                local_path = os.path.join(base_dir, f'{spec["DatasetName"]}.fits')
 
-    #             local_path = os.path.join(base_dir, f'{spec["DatasetName"]}.fits')
+                status = "COMPLETE"
+                msg = None
+                url = None
 
-    #             status = "COMPLETE"
-    #             msg = None
-    #             url = None
+                try:
+                    self._download_file(data_url, local_path, cache=cache, head_safe=True)
 
-    #             try:
-    #                 self._download_file(data_url, local_path, cache=cache, head_safe=True)
+                    # check file size also this is where would perform md5
+                    if not os.path.isfile(local_path):
+                        status = "ERROR"
+                        msg = "File was not downloaded"
+                        url = data_url
 
-    #                 # check file size also this is where would perform md5
-    #                 if not os.path.isfile(local_path):
-    #                     status = "ERROR"
-    #                     msg = "File was not downloaded"
-    #                     url = data_url
+                except requests.HTTPError as err:
+                    status = "ERROR"
+                    msg = "HTTPError: {0}".format(err)
+                    url = data_url
 
-    #             except HTTPError as err:
-    #                 status = "ERROR"
-    #                 msg = "HTTPError: {0}".format(err)
-    #                 url = data_url
+                manifest_array.append([local_path, status, msg, url])
 
-    #             manifest_array.append([local_path, status, msg, url])
+                manifest = Table(rows=manifest_array, names=('Local Path', 'Status', 'Message', "URL"))
 
-    #             manifest = Table(rows=manifest_array, names=('Local Path', 'Status', 'Message', "URL"))
-
-    #     return manifest
+        return manifest
 
 
 Catalogs = CatalogsClass()
