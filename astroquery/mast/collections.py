@@ -5,7 +5,6 @@ MAST Collections
 
 This module contains methods for discovering and querying MAST catalog collections.
 """
-
 import difflib
 import os
 import re
@@ -767,9 +766,8 @@ class CatalogsClass(MastQueryWithLogin):
         if version == 2:
             service = "Mast.HscMatches.Db.v2"
         else:
-            if version not in (3, None):
-                warnings.warn("Invalid HSC version number, defaulting to v3.", InputWarning)
-            service = "Mast.HscMatches.Db.v3"
+            catalog = catalog.lower()
+            collection_obj._verify_catalog(catalog)
 
         params = {"input": match}
 
