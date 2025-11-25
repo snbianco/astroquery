@@ -5,7 +5,6 @@ MAST Collections
 
 This module contains methods for discovering and querying MAST catalog collections.
 """
-
 import difflib
 import os
 import re
@@ -779,16 +778,12 @@ class CatalogsClass(MastQueryWithLogin):
     @deprecated(since="v0.4.13", message=("This function is deprecated and will be removed in a future release."))
     def get_hsc_spectra_async(self, *, pagesize=None, page=None):
         """
-        Returns all Hubble Source Catalog spectra.
+        Given a collection name, find or create the corresponding CatalogCollection object.
 
         Parameters
         ----------
-        pagesize : int, optional
-            Can be used to override the default pagesize.
-            E.g. when using a slow internet connection.
-        page : int, optional
-            Can be used to override the default behavior of all results being returned to obtain
-            one specific page of results.
+        collection_name : str
+            The name of the collection.
 
         Returns
         -------
@@ -800,22 +795,14 @@ class CatalogsClass(MastQueryWithLogin):
     @deprecated(since="v0.4.13", message=("This function is deprecated and will be removed in a future release."))
     def download_hsc_spectra(self, spectra, *, download_dir=None, cache=True, curl_flag=False):
         """
-        Download one or more Hubble Source Catalog spectra.
+        Return (collection, catalog) applying default attributes, validation, and normalization.
 
         Parameters
         ----------
-        spectra : `~astropy.table.Table` or `~astropy.table.Row`
-            One or more HSC spectra to be downloaded.
-        download_dir : str, optional
-           Specify the base directory to download spectra into.
-           Spectra will be saved in the subdirectory download_dir/mastDownload/HSC.
-           If download_dir is not specified the base directory will be '.'.
-        cache : bool, optional
-            Default is True. If file is found on disc it will not be downloaded again.
-            Note: has no affect when downloading curl script.
-        curl_flag : bool, optional
-            Default is False.  If true instead of downloading files directly, a curl script
-            will be downloaded that can be used to download the data files at a later time.
+        collection : str, optional
+            The collection to be queried. If None, uses the instance's default collection.
+        catalog : str, optional
+            The catalog within the collection to query. If None, uses the instance's default catalog.
 
         Returns
         -------
