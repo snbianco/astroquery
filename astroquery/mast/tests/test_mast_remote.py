@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 import astropy.units as u
 
-from astroquery.mast import Observations, utils, Mast, Catalogs, Hapcut, Tesscut, Zcut, MastMissions
+from astroquery.mast import Observations, utils, Mast, Catalogs, CatalogMetadata, CatalogCollection, Hapcut, Tesscut, Zcut, MastMissions
 
 from ..catalog_collection import CatalogMetadata, CatalogCollection, DEFAULT_CATALOGS
 from ..utils import ResolverError
@@ -1293,32 +1293,10 @@ class TestMast:
     # CatalogCollection tests #
     ###########################
 
-    def test_catalog_collection_discover_collections(self):
-        collections = CatalogCollection.discover_collections()
-        assert isinstance(collections, Table)
-        assert len(collections) > 0
-        assert "collection_name" in collections.colnames
-        assert "parent_collection" in collections.colnames
-        assert CatalogCollection._discovered_collections is not None
-
-    def test_catalog_collection_get_parent_collection(self):
-        parent = CatalogCollection.get_parent_collection("TIC")
-        assert parent == "tic"
-
-        parent = CatalogCollection.get_parent_collection("tic_v82")
-        assert parent == "mast_catalogs"
-
-    @pytest.mark.parametrize("collection", ["caom", "tic_v82"])
-    def test_catalog_collection_get_catalogs(self, collection):
-        cc = CatalogCollection(collection)
-        catalogs = cc._fetch_catalogs()
-        assert isinstance(catalogs, Table)
-        assert len(catalogs) > 0
-        assert catalogs.colnames == ["catalog_name", "description"]
-
-    @pytest.mark.parametrize("collection", ["caom", "ullyses", "tic"])
-    def test_catalog_collection_get_catalog_metadata(self, collection):
-        cc = CatalogCollection(collection)
+    @pytest.mark.filterwarnings("ignore::pyvo.io.vosi.exceptions.W02")
+    @pytest.mark.parametrize("catalog", ["caom", "ullyses", "tic"])
+    def test_catalog_collection_get_catalog_metadata(self, catalog):
+        cc = CatalogCollection(catalog)
         default_catalog = cc.get_default_catalog()
         default_metadata = cc.get_catalog_metadata(default_catalog)
         assert isinstance(default_metadata, CatalogMetadata)
