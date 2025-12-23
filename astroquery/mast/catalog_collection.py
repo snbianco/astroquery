@@ -296,7 +296,8 @@ class CatalogCollection:
         if not criteria:
             return
         self._verify_catalog(catalog)
-        col_names = list(self.get_catalog_metadata(catalog)['column_metadata']['name'])
+        metadata = self.get_catalog_metadata(catalog)
+        col_names = list(metadata.column_metadata['name'])
 
         # Check each criteria argument for validity
         for kwd in criteria.keys():
