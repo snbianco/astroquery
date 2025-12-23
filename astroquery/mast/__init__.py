@@ -36,11 +36,13 @@ conf = Conf()
 from .cutouts import TesscutClass, Tesscut, ZcutClass, Zcut, HapcutClass, Hapcut
 from .observations import Observations, ObservationsClass, MastClass, Mast
 from .collections import Catalogs, CatalogsClass
+from .catalog_collection import CatalogMetadata, CatalogCollection
 from .missions import MastMissions, MastMissionsClass
 from . import utils
 
 __all__ = ['Observations', 'ObservationsClass',
            'Catalogs', 'CatalogsClass',
+           'CatalogMetadata', 'CatalogCollection',
            'MastMissions', 'MastMissionsClass',
            'Mast', 'MastClass',
            'Tesscut', 'TesscutClass',
