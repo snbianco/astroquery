@@ -13,7 +13,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 import astropy.units as u
 
-from astroquery.mast import Observations, utils, Mast, Catalogs, Hapcut, Tesscut, Zcut, MastMissions
+from astroquery.mast import Observations, utils, Mast, Catalogs, CatalogMetadata, CatalogCollection, Hapcut, Tesscut, Zcut, MastMissions
 
 from ..utils import ResolverError
 from ...exceptions import (InputWarning, InvalidQueryError, MaxResultsWarning,
@@ -1320,6 +1320,77 @@ class TestMast:
                                                download_dir=str(tmpdir), curl_flag=True)
         assert isinstance(result, Table)
         assert os.path.isfile(result['Local Path'][0])
+
+    ################################
+    # CatalogCollectionClass tests #
+    ################################
+
+    def test_catalog_collection_get_catalog_metadata(self):
+        cc = CatalogCollection("TIC")
+        default_catalog = cc.get_default_catalog()
+        default_metadata = cc.get_catalog_metadata(default_catalog)
+        assert isinstance(default_metadata, CatalogMetadata)
+        assert isinstance(default_metadata.column_metadata, Table)
+        assert isinstance(default_metadata.ra_column, str)
+        assert isinstance(default_metadata.dec_column, str)
+        assert isinstance(default_metadata.supports_spatial_queries, bool)
+
+        assert len(default_metadata.column_metadata) > 1
+        assert default_metadata.ra_column == "ra"
+        assert default_metadata.dec_column == "dec"
+        assert default_metadata.supports_spatial_queries
+
+        assert default_catalog in cc._catalog_metadata_cache
+        default_metadata_cached = cc.get_catalog_metadata(default_catalog)
+        assert default_metadata == default_metadata_cached
+
+
+    def test_catalog_collection_invalid_get_catalog_metadata(self):
+        cc = CatalogCollection("TIC")
+        invalid_catalog = "invalid_catalog"
+        with pytest.raises(InvalidQueryError, match = f"Catalog '{invalid_catalog}' is not recognized for collection '{cc.name}'. Available catalogs are: tap_schema.schemas, tap_schema.tables, tap_schema.columns, tap_schema.keys, tap_schema.key_columns, dbo.catalogrecord"):
+            cc.get_catalog_metadata(invalid_catalog)
+
+
+    def test_catalog_collection_get_default_catalog(self):
+        cc = CatalogCollection("TIC")
+        catalogs = cc._get_catalogs()
+        default = cc.get_default_catalog()
+
+        assert len(catalogs) >1
+        assert isinstance(catalogs, Table)
+        assert catalogs.colnames == ['catalog_name', 'description']
+
+        assert not default.startswith("tap_schema")
+        assert default in catalogs["catalog_name"]
+
+
+    def test_catalog_collection_run_tap_query(self):
+        cc = CatalogCollection("GAIADR3")
+        adql_str = "SELECT TOP 5000 solution_id, designation, source_id FROM gaia_source WHERE ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+        result = cc.run_tap_query(adql_str)
+
+        assert isinstance(result, Table)
+        assert result.colnames == ['solution_id', 'designation', 'source_id']
+
+
+    def test_catalog_collection_verify_criteria(self):
+        cc = CatalogCollection("TIC")
+        default_catalog = cc.get_default_catalog()
+
+        result = cc._verify_criteria(default_catalog)
+        assert result is None
+
+        cc._verify_criteria(default_catalog, gaiabp=1)
+
+        close_match_col = "gaiagaiabp"
+        with pytest.raises(InvalidQueryError, match = f"Filter '{close_match_col}' is not recognized for collection '{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?"):
+            cc._verify_criteria(default_catalog, gaiagaiabp=1)
+
+        invalid_col = "fake_column"
+        with pytest.raises(InvalidQueryError, match = f"Filter '{invalid_col}' is not recognized for collection '{cc.name}' and catalog '{default_catalog}'."):
+            cc._verify_criteria(default_catalog, fake_column=1)
+
 
     ######################
     # TesscutClass tests #
