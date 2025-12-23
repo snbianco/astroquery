@@ -375,6 +375,7 @@ def get_patch_tap_query(patch_tap, run_async=False):
     query = args[0]
     return query
 
+
 ###########################
 # MissionSearchClass Test #
 ###########################
