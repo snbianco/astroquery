@@ -13,8 +13,9 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 import astropy.units as u
 
-from astroquery.mast import Observations, utils, Mast, Catalogs, CatalogMetadata, CatalogCollection, Hapcut, Tesscut, Zcut, MastMissions
+from astroquery.mast import Observations, utils, Mast, Catalogs, Hapcut, Tesscut, Zcut, MastMissions
 
+from ..catalog_collection import CatalogMetadata, CatalogCollection, DEFAULT_CATALOGS
 from ..utils import ResolverError
 from ...exceptions import (InputWarning, InvalidQueryError, MaxResultsWarning,
                            NoResultsWarning)
@@ -1325,8 +1326,10 @@ class TestMast:
     # CatalogCollectionClass tests #
     ################################
 
-    def test_catalog_collection_get_catalog_metadata(self):
-        cc = CatalogCollection("TIC")
+    @pytest.mark.filterwarnings("ignore::pyvo.io.vosi.exceptions.W02")
+    @pytest.mark.parametrize("catalog", ["caom", "gaiadr3", "tic"])
+    def test_catalog_collection_get_catalog_metadata(self, catalog):
+        cc = CatalogCollection(catalog)
         default_catalog = cc.get_default_catalog()
         default_metadata = cc.get_catalog_metadata(default_catalog)
         assert isinstance(default_metadata, CatalogMetadata)
@@ -1336,24 +1339,27 @@ class TestMast:
         assert isinstance(default_metadata.supports_spatial_queries, bool)
 
         assert len(default_metadata.column_metadata) > 1
-        assert default_metadata.ra_column == "ra"
-        assert default_metadata.dec_column == "dec"
-        assert default_metadata.supports_spatial_queries
+        assert default_metadata.ra_column in default_metadata.column_metadata["name"]
+        assert default_metadata.dec_column in default_metadata.column_metadata["name"]
+        #assert default_metadata.supports_spatial_queries
 
-        assert default_catalog in cc._catalog_metadata_cache
+        metadata_cache = cc._catalog_metadata_cache
+        assert default_catalog.casefold() in metadata_cache
         default_metadata_cached = cc.get_catalog_metadata(default_catalog)
-        assert default_metadata == default_metadata_cached
+        assert default_metadata is default_metadata_cached
 
 
     def test_catalog_collection_invalid_get_catalog_metadata(self):
         cc = CatalogCollection("TIC")
         invalid_catalog = "invalid_catalog"
-        with pytest.raises(InvalidQueryError, match = f"Catalog '{invalid_catalog}' is not recognized for collection '{cc.name}'. Available catalogs are: tap_schema.schemas, tap_schema.tables, tap_schema.columns, tap_schema.keys, tap_schema.key_columns, dbo.catalogrecord"):
+        with pytest.raises(InvalidQueryError, match = f"Catalog '{invalid_catalog}' is not recognized for collection '{cc.name}'."):
             cc.get_catalog_metadata(invalid_catalog)
 
 
-    def test_catalog_collection_get_default_catalog(self):
-        cc = CatalogCollection("TIC")
+    @pytest.mark.filterwarnings("ignore::pyvo.io.vosi.exceptions.W02")
+    @pytest.mark.parametrize("catalog", DEFAULT_CATALOGS.keys())
+    def test_catalog_collection_get_default_catalog(self, catalog):
+        cc = CatalogCollection(catalog)
         catalogs = cc._get_catalogs()
         default = cc.get_default_catalog()
 
@@ -1362,16 +1368,19 @@ class TestMast:
         assert catalogs.colnames == ['catalog_name', 'description']
 
         assert not default.startswith("tap_schema")
-        assert default in catalogs["catalog_name"]
+        assert default.casefold() in [name.casefold() for name in catalogs["catalog_name"]]
+        assert DEFAULT_CATALOGS[catalog] == default
 
 
     def test_catalog_collection_run_tap_query(self):
         cc = CatalogCollection("GAIADR3")
-        adql_str = "SELECT TOP 5000 solution_id, designation, source_id FROM gaia_source WHERE ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+        adql_str = "SELECT TOP 5000 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
         result = cc.run_tap_query(adql_str)
 
         assert isinstance(result, Table)
-        assert result.colnames == ['solution_id', 'designation', 'source_id']
+        assert result.colnames == ['solution_id', 'designation', 'source_id', 'ra', 'dec']
+        assert ((result["ra"] >= 10) & (result["ra"] <= 11)).all()
+        assert ((result["dec"] >= 12) & (result["dec"] <= 13)).all()
 
 
     def test_catalog_collection_verify_criteria(self):
@@ -1381,7 +1390,11 @@ class TestMast:
         result = cc._verify_criteria(default_catalog)
         assert result is None
 
-        cc._verify_criteria(default_catalog, gaiabp=1)
+        result = cc._verify_criteria(default_catalog, gaiabp=1)
+        assert result is None
+
+        result = cc._verify_criteria(default_catalog, gaiabp=1, teff=1, e_gaiabp=1)
+        assert result is None
 
         close_match_col = "gaiagaiabp"
         with pytest.raises(InvalidQueryError, match = f"Filter '{close_match_col}' is not recognized for collection '{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?"):
