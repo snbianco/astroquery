@@ -1389,8 +1389,8 @@ class TestMast:
         assert isinstance(default_metadata.supports_spatial_queries, bool)
 
         assert len(default_metadata.column_metadata) > 1
-        assert default_metadata.ra_column in default_metadata.column_metadata["name"]
-        assert default_metadata.dec_column in default_metadata.column_metadata["name"]
+        assert default_metadata.ra_column in default_metadata.column_metadata["column_name"]
+        assert default_metadata.dec_column in default_metadata.column_metadata["column_name"]
         assert default_metadata.supports_spatial_queries
 
         metadata_cache = cc._catalog_metadata_cache
@@ -1410,7 +1410,7 @@ class TestMast:
     @pytest.mark.parametrize("catalog", DEFAULT_CATALOGS.keys())
     def test_catalog_collection_get_default_catalog(self, catalog):
         cc = CatalogCollection(catalog)
-        catalogs = cc._get_catalogs()
+        catalogs = cc._fetch_catalogs()
         default = cc.get_default_catalog()
 
         assert len(catalogs) >1
