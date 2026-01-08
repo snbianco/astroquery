@@ -1341,7 +1341,7 @@ class TestMast:
         assert len(default_metadata.column_metadata) > 1
         assert default_metadata.ra_column in default_metadata.column_metadata["name"]
         assert default_metadata.dec_column in default_metadata.column_metadata["name"]
-        #assert default_metadata.supports_spatial_queries
+        assert default_metadata.supports_spatial_queries
 
         metadata_cache = cc._catalog_metadata_cache
         assert default_catalog.casefold() in metadata_cache
