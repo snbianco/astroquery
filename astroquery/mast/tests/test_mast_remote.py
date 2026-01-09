@@ -1322,12 +1322,12 @@ class TestMast:
         assert isinstance(result, Table)
         assert os.path.isfile(result['Local Path'][0])
 
-    ################################
-    # CatalogCollectionClass tests #
-    ################################
+    ###########################
+    # CatalogCollection tests #
+    ###########################
 
     @pytest.mark.filterwarnings("ignore::pyvo.io.vosi.exceptions.W02")
-    @pytest.mark.parametrize("catalog", ["caom", "gaiadr3", "tic"])
+    @pytest.mark.parametrize("catalog", ["caom", "ullyses", "tic"])
     def test_catalog_collection_get_catalog_metadata(self, catalog):
         cc = CatalogCollection(catalog)
         default_catalog = cc.get_default_catalog()
@@ -1341,7 +1341,8 @@ class TestMast:
         assert len(default_metadata.column_metadata) > 1
         assert default_metadata.ra_column in default_metadata.column_metadata["column_name"]
         assert default_metadata.dec_column in default_metadata.column_metadata["column_name"]
-        assert default_metadata.supports_spatial_queries
+        if catalog != "ullyses":
+            assert default_metadata.supports_spatial_queries
 
         metadata_cache = cc._catalog_metadata_cache
         assert default_catalog.casefold() in metadata_cache
@@ -1357,7 +1358,7 @@ class TestMast:
 
 
     @pytest.mark.filterwarnings("ignore::pyvo.io.vosi.exceptions.W02")
-    @pytest.mark.parametrize("catalog", DEFAULT_CATALOGS.keys())
+    @pytest.mark.parametrize("catalog", ["tic", "classy", "ullyses"])
     def test_catalog_collection_get_default_catalog(self, catalog):
         cc = CatalogCollection(catalog)
         catalogs = cc._fetch_catalogs()
@@ -1374,7 +1375,7 @@ class TestMast:
 
     def test_catalog_collection_run_tap_query(self):
         cc = CatalogCollection("GAIADR3")
-        adql_str = "SELECT TOP 5000 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+        adql_str = "SELECT TOP 10 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
         result = cc.run_tap_query(adql_str)
 
         assert isinstance(result, Table)
