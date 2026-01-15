@@ -44,14 +44,15 @@ class CatalogsClass(MastQueryWithLogin):
 
         super().__init__()
 
-        self.available_collections = self.get_collections()['collection_name'].tolist()
+        self._available_collections = None  # Lazy load on first request
         self._no_longer_supported_collections = ['ctl', 'diskdetective', 'galex', 'plato']
         self._renamed_collections = {'panstarrs': 'ps1_dr2', 'gaia': 'gaiadr3'}
         self._collections_cache = dict()
 
-        self.collection = collection
-        if catalog:
-            self.catalog = catalog
+        # Initialization of this class should not trigger network requests
+        # These properties are first set without validation
+        self._collection = CatalogCollection(collection)
+        self._catalog = catalog if catalog else self._collection.default_catalog
 
     @property
     def collection(self):
@@ -88,6 +89,16 @@ class CatalogsClass(MastQueryWithLogin):
         catalog = self.collection._verify_catalog(catalog)
         self._catalog = catalog
 
+    @property
+    def available_collections(self):
+        """
+        The list of available MAST catalog collections.
+        """
+        if self._available_collections is None:
+            table = self.get_collections()
+            self._available_collections = table['collection_name'].tolist()
+        return self._available_collections
+
     @class_or_instance
     def get_collections(self):
         """
@@ -99,13 +110,13 @@ class CatalogsClass(MastQueryWithLogin):
             A table containing the available MAST collections.
         """
         # If already cached, use it directly
-        if getattr(self, "available_collections", None):
-            return Table([self.available_collections], names=('collection_name',))
+        if getattr(self, "_available_collections", None):
+            return Table([self._available_collections], names=('collection_name',))
 
         # Otherwise, fetch from the TAP service
         log.debug("Fetching available collections from MAST TAP service.")
         url = self.TAP_BASE_URL + "openapi.json"
-        response = requests.get(url)
+        response = utils._simple_request(url)
         response.raise_for_status()
         data = response.json()
 
@@ -155,6 +166,10 @@ class CatalogsClass(MastQueryWithLogin):
         """
         collection_obj, catalog = self._parse_inputs(collection, catalog)
         return collection_obj.get_catalog_metadata(catalog).column_metadata
+    
+    def supports_spatial_queries(self, collection=None, catalog=None):
+        collection_obj, catalog = self._parse_inputs(collection, catalog)
+        return collection_obj.get_catalog_metadata(catalog).supports_spatial_queries
 
     @class_or_instance
     @deprecated_renamed_argument('version', None, since='0.4.12', message='The `version` argument is deprecated and '
