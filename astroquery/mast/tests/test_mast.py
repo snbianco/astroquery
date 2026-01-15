@@ -11,7 +11,8 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import numpy as np
-from pyvo.dal import TAPResults, TAPService
+from pyvo.dal import TAPResults
+from pyvo.dal.exceptions import DALQueryError
 from pyvo.io.vosi import parse_capabilities
 from astropy.table import Table, unique
 from astropy.coordinates import SkyCoord
@@ -242,9 +243,12 @@ def zcut_download_mockreturn(url, file_path):
     copyfile(filename, file_path)
     return
 
+
 def vo_tap_mock():
     def run_sync_mock(query, **kwargs):
         print(query)
+        if 'invalid' in query:
+            raise DALQueryError("Simulated TAP query error for testing.")
         if 'tap_schema.tables' in query:
             filename = data_path(DATA_FILES['tap_catalogs'])
         elif 'tap_schema.columns' in query:
@@ -253,7 +257,7 @@ def vo_tap_mock():
             filename = data_path(DATA_FILES['tap_results'])
         votable = parse(filename)
         return TAPResults(votable)
-    
+
     # Mock TAPService
     mock_tap = MagicMock()
     mock_tap.run_sync.side_effect = run_sync_mock
@@ -300,7 +304,8 @@ def vo_tap_mock():
 # MissionSearchClass Test #
 ###########################
 
-def test_catalogs_vo_tap_query(patch_post):
+
+def test_catalogs_tap_query_region(patch_tap):
     result = mast.Catalogs.query_region(
         regionCoords,
         radius=0.002 * u.deg,
@@ -310,6 +315,25 @@ def test_catalogs_vo_tap_query(patch_post):
     assert isinstance(result, Table)
     assert len(result) == 2
     assert "ra" in result.colnames
+    # Inspect TAP query
+    args, kwargs = patch_tap.run_sync.call_args
+    query = args[0]
+
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "CIRCLE" in query
+    assert "POINT" in query
+
+
+def test_catalogs_tap_query_error(patch_tap):
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        mast.Catalogs.query_region(
+            regionCoords,
+            radius=0.002 * u.deg,
+            collection="tic",
+            allwise='invalid'
+        )
+
 
 def test_catalogs_tap_query_region(patch_tap):
     result = Catalogs.query_region(
