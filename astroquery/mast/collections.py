@@ -166,7 +166,7 @@ class CatalogsClass(MastQueryWithLogin):
         """
         collection_obj, catalog = self._parse_inputs(collection, catalog)
         return collection_obj.get_catalog_metadata(catalog).column_metadata
-    
+
     def supports_spatial_queries(self, collection=None, catalog=None):
         collection_obj, catalog = self._parse_inputs(collection, catalog)
         return collection_obj.get_catalog_metadata(catalog).supports_spatial_queries
