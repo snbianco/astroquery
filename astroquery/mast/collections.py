@@ -180,7 +180,7 @@ class CatalogsClass(MastQueryWithLogin):
                                  'and will be removed in a future release. Please use `offset` instead.')
     def query_criteria(self, collection=None, *, catalog=None, coordinates=None, region=None, objectname=None,
                        radius=0.2*u.deg, resolver=None, limit=5000, offset=0, count_only=False, select_cols=None,
-                       sort_by=None, sort_desc=False, version=None, pagesize=None, page=None, **criteria):
+                       sort_by=None, sort_desc=False, filters={}, version=None, pagesize=None, page=None, **criteria):
         """
         Query a MAST catalog from a given collection using criteria filters. To return columns for a given
         collection and catalog, use `~astroquery.mast.collections.get_catalog_metadata`.
@@ -217,6 +217,9 @@ class CatalogsClass(MastQueryWithLogin):
         sort_desc : bool or list of bool, optional
             Indicates whether to sort in descending order for each column in `sort_by`. If a single bool,
             applies to all columns. If a list, must match length of `sort_by`. Default is False (ascending order).
+        filters : dict, optional
+            Another parameter to specify criteria filters as a dictionary. Use this option when the name of a column
+            conflicts with a named parameter of this method.
         version : str, optional
             Deprecated. The version argument is no longer used. Please use `collection` and `catalog` instead.
         pagesize : int, optional
@@ -256,7 +259,20 @@ class CatalogsClass(MastQueryWithLogin):
             raise InvalidQueryError('Specify either `region` or `objectname`, not both.')
 
         collection_obj, catalog = self._parse_inputs(collection, catalog)
-        collection_obj._verify_criteria(catalog, **criteria)
+
+        # Check for conflicts between named parameters and filters dict
+        if criteria and filters:
+            overlap = set(criteria) & set(filters)
+            if overlap:
+                raise InvalidQueryError(f"Criteria specified both as keyword arguments and in 'filters' for columns: "
+                                        f"{', '.join(overlap)}")
+
+        # Merge criteria from named parameters and filters dict
+        all_criteria = {}
+        all_criteria.update(criteria)
+        all_criteria.update(filters)
+
+        collection_obj._verify_criteria(catalog, **all_criteria)
         column_metadata = collection_obj.get_catalog_metadata(catalog).column_metadata
         columns = '*' if not select_cols else self._parse_select_cols(select_cols, column_metadata)
         adql = (f'SELECT TOP {limit} {columns} FROM '
@@ -290,8 +306,8 @@ class CatalogsClass(MastQueryWithLogin):
             adql += (f'WHERE CONTAINS(POINT(\'ICRS\', {ra_col}, {dec_col}), {adql_region}) = 1 ')
 
         # Add additional constraints
-        if criteria:
-            conditions = self._format_criteria_conditions(collection_obj, catalog, criteria)
+        if all_criteria:
+            conditions = self._format_criteria_conditions(collection_obj, catalog, all_criteria)
             if 'WHERE' in adql:
                 adql += 'AND ' + ' AND '.join(conditions)
             else:
@@ -336,7 +352,7 @@ class CatalogsClass(MastQueryWithLogin):
                                  'and will be removed in a future release. Please use `offset` instead.')
     def query_region(self, coordinates=None, *, radius=0.2*u.deg, region=None, collection=None,
                      catalog=None, limit=5000, offset=0, count_only=False, select_cols=None,
-                     sort_by=None, sort_desc=False, version=None, pagesize=None, page=None, **criteria):
+                     sort_by=None, sort_desc=False, filters={}, version=None, pagesize=None, page=None, **criteria):
         """
         Query for MAST catalog entries within a specified region using criteria filters. To return columns for a given
         collection and catalog, use `~astroquery.mast.collections.get_catalog_metadata`.
@@ -369,6 +385,9 @@ class CatalogsClass(MastQueryWithLogin):
         sort_desc : bool or list of bool, optional
             Indicates whether to sort in descending order for each column in `sort_by`. If a single bool,
             applies to all columns. If a list, must match length of `sort_by`. Default is False (ascending order).
+        filters : dict, optional
+            Another parameter to specify criteria filters as a dictionary. Use this option when the name of a column
+            conflicts with a named parameter of this method.
         version : str, optional
             Deprecated. The version argument is no longer used. Please use `collection` and `catalog` instead.
         pagesize : int, optional
@@ -414,6 +433,7 @@ class CatalogsClass(MastQueryWithLogin):
                                    select_cols=select_cols,
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
+                                   filters=filters,
                                    **criteria)
 
     @class_or_instance
@@ -425,7 +445,7 @@ class CatalogsClass(MastQueryWithLogin):
                                  'and will be removed in a future release. Please use `offset` instead.')
     def query_object(self, objectname, *, radius=0.2*u.deg, collection=None, catalog=None, resolver=None,
                      limit=5000, offset=0, count_only=False, select_cols=None, sort_by=None, sort_desc=False,
-                     version=None, pagesize=None, page=None, **criteria):
+                     filters={}, version=None, pagesize=None, page=None, **criteria):
         """
         Query for MAST catalog entries around a specified object name using criteria filters. To return columns
         for a given collection and catalog, use `~astroquery.mast.collections.get_catalog_metadata`.
@@ -455,6 +475,9 @@ class CatalogsClass(MastQueryWithLogin):
         sort_desc : bool or list of bool, optional
             Indicates whether to sort in descending order for each column in `sort_by`. If a single bool,
             applies to all columns. If a list, must match length of `sort_by`. Default is False (ascending order).
+        filters : dict, optional
+            Another parameter to specify criteria filters as a dictionary. Use this option when the name of a column
+            conflicts with a named parameter of this method.
         version : str, optional
             Deprecated. The version argument is no longer used. Please use `collection` and `catalog` instead.
         pagesize : int, optional
@@ -495,6 +518,7 @@ class CatalogsClass(MastQueryWithLogin):
                                    select_cols=select_cols,
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
+                                   filters=filters,
                                    **criteria)
 
     @class_or_instance
