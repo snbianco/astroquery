@@ -1399,13 +1399,12 @@ class TestMast:
         default_metadata_cached = cc.get_catalog_metadata(default_catalog)
         assert default_metadata is default_metadata_cached
 
-
     def test_catalog_collection_invalid_get_catalog_metadata(self):
         cc = CatalogCollection("TIC")
         invalid_catalog = "invalid_catalog"
-        with pytest.raises(InvalidQueryError, match = f"Catalog '{invalid_catalog}' is not recognized for collection '{cc.name}'."):
+        with pytest.raises(InvalidQueryError, match=f"Catalog '{invalid_catalog}' is not "
+                           f"recognized for collection '{cc.name}'."):
             cc.get_catalog_metadata(invalid_catalog)
-
 
     @pytest.mark.filterwarnings("ignore::pyvo.io.vosi.exceptions.W02")
     @pytest.mark.parametrize("catalog", ["tic", "classy", "ullyses"])
@@ -1414,7 +1413,7 @@ class TestMast:
         catalogs = cc._fetch_catalogs()
         default = cc.get_default_catalog()
 
-        assert len(catalogs) >1
+        assert len(catalogs) > 1
         assert isinstance(catalogs, Table)
         assert catalogs.colnames == ['catalog_name', 'description']
 
@@ -1422,17 +1421,16 @@ class TestMast:
         assert default.casefold() in [name.casefold() for name in catalogs["catalog_name"]]
         assert DEFAULT_CATALOGS[catalog] == default
 
-
     def test_catalog_collection_run_tap_query(self):
         cc = CatalogCollection("GAIADR3")
-        adql_str = "SELECT TOP 10 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+        adql_str = "SELECT TOP 10 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE " \
+                   "ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
         result = cc.run_tap_query(adql_str)
 
         assert isinstance(result, Table)
         assert result.colnames == ['solution_id', 'designation', 'source_id', 'ra', 'dec']
         assert ((result["ra"] >= 10) & (result["ra"] <= 11)).all()
         assert ((result["dec"] >= 12) & (result["dec"] <= 13)).all()
-
 
     def test_catalog_collection_verify_criteria(self):
         cc = CatalogCollection("TIC")
@@ -1448,13 +1446,14 @@ class TestMast:
         assert result is None
 
         close_match_col = "gaiagaiabp"
-        with pytest.raises(InvalidQueryError, match = f"Filter '{close_match_col}' is not recognized for collection '{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?"):
+        with pytest.raises(InvalidQueryError, match=f"Filter '{close_match_col}' is not recognized for collection "
+                           f"'{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?"):
             cc._verify_criteria(default_catalog, gaiagaiabp=1)
 
         invalid_col = "fake_column"
-        with pytest.raises(InvalidQueryError, match = f"Filter '{invalid_col}' is not recognized for collection '{cc.name}' and catalog '{default_catalog}'."):
+        with pytest.raises(InvalidQueryError, match=f"Filter '{invalid_col}' is not recognized for collection "
+                           f"'{cc.name}' and catalog '{default_catalog}'."):
             cc._verify_criteria(default_catalog, fake_column=1)
-
 
     ######################
     # TesscutClass tests #
