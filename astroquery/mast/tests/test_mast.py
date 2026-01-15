@@ -11,6 +11,8 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import numpy as np
+from pyvo.dal import TAPResults, TAPService
+from pyvo.io.vosi import parse_capabilities
 from astropy.table import Table, unique
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -240,6 +242,29 @@ def zcut_download_mockreturn(url, file_path):
     copyfile(filename, file_path)
     return
 
+def vo_tap_mock():
+    def run_sync_mock(query, **kwargs):
+        print(query)
+        if 'tap_schema.tables' in query:
+            filename = data_path(DATA_FILES['tap_catalogs'])
+        elif 'tap_schema.columns' in query:
+            filename = data_path(DATA_FILES['tap_columns'])
+        elif 'WHERE' in query:
+            filename = data_path(DATA_FILES['tap_results'])
+        votable = parse(filename)
+        return TAPResults(votable)
+    
+    # Mock TAPService
+    mock_tap = MagicMock()
+    mock_tap.run_sync.side_effect = run_sync_mock
+
+    # Capabilities
+    filename = data_path(DATA_FILES['tap_capabilities'])
+    with open(filename, "rb") as f:
+        caps = parse_capabilities(f)
+    mock_tap.capabilities = caps
+
+    return mock_tap
 
 def vo_tap_mock():
     def run_sync_mock(query, **kwargs):
@@ -275,6 +300,16 @@ def vo_tap_mock():
 # MissionSearchClass Test #
 ###########################
 
+def test_catalogs_vo_tap_query(patch_post):
+    result = mast.Catalogs.query_region(
+        regionCoords,
+        radius=0.002 * u.deg,
+        collection="tic"
+    )
+
+    assert isinstance(result, Table)
+    assert len(result) == 2
+    assert "ra" in result.colnames
 
 def test_catalogs_tap_query_region(patch_tap):
     result = Catalogs.query_region(
