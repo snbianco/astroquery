@@ -11,9 +11,7 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import numpy as np
-from pyvo.dal import TAPResults
-from pyvo.dal.exceptions import DALQueryError
-from pyvo.io.vosi import parse_capabilities
+import astropy.units as u
 from astropy.table import Table, unique
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -29,8 +27,9 @@ from astroquery.mast import (Catalogs, MastMissions, Observations, Tesscut, Zcut
                              discovery_portal, auth, core)
 from astroquery.mast.cloud import CloudAccess
 from astroquery.utils.mocks import MockResponse
-from astroquery.exceptions import (BlankResponseWarning, InvalidQueryError, InputWarning, MaxResultsWarning,
-                                   NoResultsWarning, RemoteServiceError, ResolverError)
+from astroquery.exceptions import (InvalidQueryError, InputWarning, MaxResultsWarning, NoResultsWarning,
+                                   RemoteServiceError, ResolverError)
+from astroquery import mast
 
 DATA_FILES = {'Mast.Caom.Cone': 'caom.json',
               'Mast.Name.Lookup': 'resolver.json',
@@ -248,12 +247,17 @@ def vo_tap_mock():
     def run_sync_mock(query, **kwargs):
         print(query)
         if 'invalid' in query:
-            raise DALQueryError("Simulated TAP query error for testing.")
-        if 'tap_schema.tables' in query:
+            # Use this when wanting to simulate a DALQueryError
+            # Where it occurs will depend on where you pass it (collection, catalog, parameter, etc.)
+            raise DALQueryError('Simulated TAP query error for testing.')
+        elif 'tap_schema.tables' in query:
+            # Queries to get catalogs
             filename = data_path(DATA_FILES['tap_catalogs'])
         elif 'tap_schema.columns' in query:
+            # Queries to get column metadata
             filename = data_path(DATA_FILES['tap_columns'])
         elif 'WHERE' in query:
+            # Queries with results, keep in mind this is not meaninful and results won't match the query
             filename = data_path(DATA_FILES['tap_results'])
         votable = parse(filename)
         return TAPResults(votable)
@@ -262,7 +266,7 @@ def vo_tap_mock():
     mock_tap = MagicMock()
     mock_tap.run_sync.side_effect = run_sync_mock
 
-    # Capabilities
+    # Capabilities -> Not much to do here
     filename = data_path(DATA_FILES['tap_capabilities'])
     with open(filename, "rb") as f:
         caps = parse_capabilities(f)
@@ -326,6 +330,8 @@ def test_catalogs_tap_query_region(patch_tap):
 
 
 def test_catalogs_tap_query_error(patch_tap):
+    # This will trigger a DALQueryError in the mock TAP service
+    # when 'invalid' is found in the query string
     with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
         mast.Catalogs.query_region(
             regionCoords,
