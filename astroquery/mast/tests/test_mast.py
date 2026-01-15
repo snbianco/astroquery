@@ -8,7 +8,8 @@ from shutil import copyfile
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pyvo.dal import TAPResults, TAPService
+from pyvo.dal import TAPResults
+from pyvo.dal.exceptions import DALQueryError
 from pyvo.io.vosi import parse_capabilities
 from astropy.table import Table, unique
 from astropy.coordinates import SkyCoord
@@ -82,10 +83,6 @@ def patch_post(request):
     mp.setattr(mast.discovery_portal.PortalAPI, '_request', post_mockreturn)
     mp.setattr(mast.services.ServiceAPI, '_request', service_mockreturn)
     mp.setattr(mast.auth.MastAuth, 'session_info', session_info_mockreturn)
-    mp.setattr(
-        'astroquery.mast.catalog_collection.TAPService',
-        lambda *args, **kwargs: vo_tap_mock()
-    )
 
     mp.setattr(mast.Observations, '_download_file', download_mockreturn)
     mp.setattr(mast.Observations, 'download_file', download_mockreturn)
@@ -95,6 +92,20 @@ def patch_post(request):
     mp.setattr(mast.Zcut, '_download_file', zcut_download_mockreturn)
 
     return mp
+
+
+@pytest.fixture
+def patch_tap(request):
+    mp = request.getfixturevalue("monkeypatch")
+
+    mock_tap = vo_tap_mock()
+    mp.setattr(
+        'astroquery.mast.catalog_collection.TAPService',
+        lambda *args, **kwargs: mock_tap
+    )
+    mp.setattr(mast.utils, '_simple_request', request_mockreturn)
+
+    return mock_tap
 
 
 def post_mockreturn(self, method="POST", url=None, data=None, timeout=10, **kwargs):
@@ -218,9 +229,12 @@ def zcut_download_mockreturn(url, file_path):
     copyfile(filename, file_path)
     return
 
+
 def vo_tap_mock():
     def run_sync_mock(query, **kwargs):
         print(query)
+        if 'invalid' in query:
+            raise DALQueryError("Simulated TAP query error for testing.")
         if 'tap_schema.tables' in query:
             filename = data_path(DATA_FILES['tap_catalogs'])
         elif 'tap_schema.columns' in query:
@@ -229,7 +243,7 @@ def vo_tap_mock():
             filename = data_path(DATA_FILES['tap_results'])
         votable = parse(filename)
         return TAPResults(votable)
-    
+
     # Mock TAPService
     mock_tap = MagicMock()
     mock_tap.run_sync.side_effect = run_sync_mock
@@ -246,7 +260,8 @@ def vo_tap_mock():
 # MissionSearchClass Test #
 ###########################
 
-def test_catalogs_vo_tap_query(patch_post):
+
+def test_catalogs_tap_query_region(patch_tap):
     result = mast.Catalogs.query_region(
         regionCoords,
         radius=0.002 * u.deg,
@@ -256,6 +271,25 @@ def test_catalogs_vo_tap_query(patch_post):
     assert isinstance(result, Table)
     assert len(result) == 2
     assert "ra" in result.colnames
+    # Inspect TAP query
+    args, kwargs = patch_tap.run_sync.call_args
+    query = args[0]
+
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "CIRCLE" in query
+    assert "POINT" in query
+
+
+def test_catalogs_tap_query_error(patch_tap):
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        mast.Catalogs.query_region(
+            regionCoords,
+            radius=0.002 * u.deg,
+            collection="tic",
+            allwise='invalid'
+        )
+
 
 def test_missions_query_region_async(patch_post):
     responses = mast.MastMissions.query_region_async(regionCoords, radius=0.002, sci_pi_last_name='GORDON')
