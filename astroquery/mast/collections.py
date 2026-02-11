@@ -249,17 +249,8 @@ class CatalogsClass(MastQueryWithLogin):
         response : `~astropy.table.Table`
             A table containing the query results.
         """
-        # If limit and offset are at defaults, check if pagesize and page are provided for backward compatibility
-        if limit == 5000 and offset == 0:
-            if pagesize is not None:
-                # Pagesize provided -> calculate limit and offset from legacy parameters
-                if page is None:
-                    page = 1  # Default to first page if not specified
-                limit = pagesize
-                offset = (page - 1) * pagesize
-            elif page is not None:
-                warnings.warn("The 'page' parameter is ignored without 'pagesize'. "
-                              "Please use `limit` and `offset` to specify pagination.", InputWarning)
+        # Parse pagination params
+        limit, offset = self._parse_legacy_pagination(limit, offset, pagesize, page)
 
         # Should not specify both region and coordinates
         if coordinates and region:
@@ -442,6 +433,9 @@ class CatalogsClass(MastQueryWithLogin):
             raise InvalidQueryError('Must specify either `region` or `coordinates`. For non-positional queries, '
                                     'use `Catalogs.query_criteria`.')
 
+        # Parse pagination params
+        limit, offset = self._parse_legacy_pagination(limit, offset, pagesize, page)
+
         return self.query_criteria(collection=collection,
                                    catalog=catalog,
                                    coordinates=coordinates,
@@ -454,8 +448,6 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
-                                   pagesize=pagesize,
-                                   page=page,
                                    **criteria)
 
     @class_or_instance
@@ -529,6 +521,9 @@ class CatalogsClass(MastQueryWithLogin):
         response : `~astropy.table.Table`
             A table containing the query results.
         """
+        # Parse pagination params
+        limit, offset = self._parse_legacy_pagination(limit, offset, pagesize, page)
+
         return self.query_criteria(collection=collection,
                                    catalog=catalog,
                                    objectname=objectname,
@@ -541,8 +536,6 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
-                                   pagesize=pagesize,
-                                   page=page,
                                    **criteria)
 
     @class_or_instance
@@ -850,6 +843,38 @@ class CatalogsClass(MastQueryWithLogin):
         if not valid_selected:
             raise InvalidQueryError("No valid columns specified in `select_cols`.")
         return ', '.join(valid_selected)
+    
+    def _parse_legacy_pagination(self, limit, offset, pagesize, page):
+        """
+        Parse legacy pagesize and page parameters to determine limit and offset.
+
+        Parameters
+        ----------
+        limit : int
+            The maximum number of results to return.
+        offset : int
+            The number of rows to skip before starting to return rows.
+        pagesize : int, optional
+            The number of results per page (legacy parameter).
+        page : int, optional
+            The page number to return (legacy parameter).
+
+        Returns
+        -------
+        tuple
+            A tuple containing the (limit, offset) values.
+        """
+        # If limit and offset are default, check for legacy pagination params
+        if limit == 5000 and offset == 0:
+            if pagesize is not None:
+                if page is None:
+                    page = 1  # Default to first page if not specified
+                limit = pagesize
+                offset = (page - 1) * pagesize
+            elif page is not None:
+                warnings.warn("The 'page' parameter is ignored without 'pagesize'. "
+                              "Please use `limit` and `offset` to specify pagination.", InputWarning)
+        return limit, offset
 
     def _create_adql_region(self, region):
         """

@@ -11,7 +11,6 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import numpy as np
-import astropy.units as u
 from astropy.table import Table, unique
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -23,11 +22,11 @@ from pyvo.dal.exceptions import DALQueryError
 from pyvo.io.vosi import parse_capabilities
 from requests import HTTPError, Response
 
-from astroquery.mast.services import _json_to_table
+from astroquery.mast import (Catalogs, MastMissions, Observations, Tesscut, Zcut, Mast, utils, services,
+                             discovery_portal, auth, core)
 from astroquery.utils.mocks import MockResponse
-from astroquery.exceptions import (InvalidQueryError, InputWarning, MaxResultsWarning, NoResultsWarning,
-                                   RemoteServiceError, ResolverError)
-from astroquery import mast
+from astroquery.exceptions import (BlankResponseWarning, InvalidQueryError, InputWarning, MaxResultsWarning,
+                                   NoResultsWarning, RemoteServiceError, ResolverError)
 
 DATA_FILES = {'Mast.Caom.Cone': 'caom.json',
               'Mast.Name.Lookup': 'resolver.json',
@@ -107,7 +106,7 @@ def patch_tap(request):
         lambda *args, **kwargs: mock_tap
     )
     # We have to set this because CatalogsClass uses a simple request to get collections
-    mp.setattr(mast.utils, '_simple_request', request_mockreturn)
+    mp.setattr(utils, '_simple_request', request_mockreturn)
 
     return mock_tap
 
@@ -237,7 +236,6 @@ def zcut_download_mockreturn(url, file_path):
 
 def vo_tap_mock():
     def run_sync_mock(query, **kwargs):
-        print(query)
         if 'invalid' in query:
             # Use this when wanting to simulate a DALQueryError
             # Where it occurs will depend on where you pass it (collection, catalog, parameter, etc.)
@@ -272,7 +270,7 @@ def vo_tap_mock():
 
 
 def test_catalogs_tap_query_region(patch_tap):
-    result = mast.Catalogs.query_region(
+    result = Catalogs.query_region(
         regionCoords,
         radius=0.002 * u.deg,
         collection="tic"
@@ -295,7 +293,7 @@ def test_catalogs_tap_query_error(patch_tap):
     # This will trigger a DALQueryError in the mock TAP service
     # when 'invalid' is found in the query string
     with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
-        mast.Catalogs.query_region(
+        Catalogs.query_region(
             regionCoords,
             radius=0.002 * u.deg,
             collection="tic",
