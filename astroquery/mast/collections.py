@@ -454,8 +454,6 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
-                                   pagesize=pagesize,
-                                   page=page,
                                    **criteria)
 
     @class_or_instance
@@ -545,8 +543,6 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
-                                   pagesize=pagesize,
-                                   page=page,
                                    **criteria)
 
     @class_or_instance
@@ -854,6 +850,38 @@ class CatalogsClass(MastQueryWithLogin):
         if not valid_selected:
             raise InvalidQueryError("No valid columns specified in `select_cols`.")
         return ', '.join(valid_selected)
+    
+    def _parse_legacy_pagination(self, limit, offset, pagesize, page):
+        """
+        Parse legacy pagesize and page parameters to determine limit and offset.
+
+        Parameters
+        ----------
+        limit : int
+            The maximum number of results to return.
+        offset : int
+            The number of rows to skip before starting to return rows.
+        pagesize : int, optional
+            The number of results per page (legacy parameter).
+        page : int, optional
+            The page number to return (legacy parameter).
+
+        Returns
+        -------
+        tuple
+            A tuple containing the (limit, offset) values.
+        """
+        # If limit and offset are default, check for legacy pagination params
+        if limit == 5000 and offset == 0:
+            if pagesize is not None:
+                if page is None:
+                    page = 1  # Default to first page if not specified
+                limit = pagesize
+                offset = (page - 1) * pagesize
+            elif page is not None:
+                warnings.warn("The 'page' parameter is ignored without 'pagesize'. "
+                              "Please use `limit` and `offset` to specify pagination.", InputWarning)
+        return limit, offset
 
     def _parse_legacy_pagination(self, limit, offset, pagesize, page):
         """
