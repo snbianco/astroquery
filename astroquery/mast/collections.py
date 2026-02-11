@@ -454,6 +454,8 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
+                                   pagesize=pagesize,
+                                   page=page,
                                    **criteria)
 
     @class_or_instance
@@ -543,6 +545,8 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
+                                   pagesize=pagesize,
+                                   page=page,
                                    **criteria)
 
     @class_or_instance
