@@ -21,7 +21,7 @@ from regions import CircleSkyRegion, PolygonSkyRegion
 
 from astroquery import log
 from ..utils import async_to_sync
-from ..exceptions import InputWarning, InvalidQueryError
+from ..exceptions import InputWarning, InvalidQueryError, NoResultsWarning
 from ..utils.class_or_instance import class_or_instance
 
 from . import utils
@@ -249,7 +249,18 @@ class CatalogsClass(MastQueryWithLogin):
         response : `~astropy.table.Table`
             A table containing the query results.
         """
-        # TODO: Implement offset when VO-TAP supports it
+        # If limit and offset are at defaults, check if pagesize and page are provided for backward compatibility
+        if limit == 5000 and offset == 0:
+            if pagesize is not None:
+                # Pagesize provided -> calculate limit and offset from legacy parameters
+                if page is None:
+                    page = 1  # Default to first page if not specified
+                limit = pagesize
+                offset = (page - 1) * pagesize
+            elif page is not None:
+                warnings.warn("The 'page' parameter is ignored without 'pagesize'. "
+                              "Please use `limit` and `offset` to specify pagination.", InputWarning)
+
         # Should not specify both region and coordinates
         if coordinates and region:
             raise InvalidQueryError('Specify either `region` or `coordinates`, not both.')
@@ -332,8 +343,17 @@ class CatalogsClass(MastQueryWithLogin):
                     raise InvalidQueryError(f"Sort column '{col}' not found in catalog '{catalog}'.")
                 sort_adql += f"{col} " + ("DESC" if sort_desc[sort_by.index(col)] else "ASC") + ", "
 
-            adql += f'ORDER BY {sort_adql.rstrip(", ")} '
+            adql += f' ORDER BY {sort_adql.rstrip(", ")}'
+
+        # Add offset
+        if offset:
+            adql += f' OFFSET {offset}'
+
+        # Execute the query
         result_table = collection_obj.run_tap_query(adql)
+
+        if len(result_table) == 0:
+            warnings.warn("The query returned no results.", NoResultsWarning)
 
         if count_only:
             return result_table['count_all'][0]
@@ -434,6 +454,8 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
+                                   pagesize=pagesize,
+                                   page=page,
                                    **criteria)
 
     @class_or_instance
@@ -519,6 +541,8 @@ class CatalogsClass(MastQueryWithLogin):
                                    sort_by=sort_by,
                                    sort_desc=sort_desc,
                                    filters=filters,
+                                   pagesize=pagesize,
+                                   page=page,
                                    **criteria)
 
     @class_or_instance
