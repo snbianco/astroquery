@@ -97,7 +97,7 @@ def patch_post(request):
 
 
 @pytest.fixture
-def patch_tap(request):
+def patch_tap(request, reset_catalogs_cache):
     mp = request.getfixturevalue("monkeypatch")
 
     mock_tap = vo_tap_mock()
@@ -109,6 +109,12 @@ def patch_tap(request):
     mp.setattr(utils, '_simple_request', request_mockreturn)
 
     return mock_tap
+
+
+@pytest.fixture
+def reset_catalogs_cache():
+    Catalogs._collections_cache.clear()
+    yield
 
 
 def post_mockreturn(self, method="POST", url=None, data=None, timeout=10, **kwargs):
