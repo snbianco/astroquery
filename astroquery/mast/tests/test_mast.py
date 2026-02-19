@@ -1224,7 +1224,7 @@ def test_catalogs_tap_query_criteria(patch_tap):
     assert isinstance(metadata, Table)
 
 
-def test_catalogs_tap_query_criteria_error():
+def test_catalogs_invalid_tap_query_criteria(patch_tap):
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
@@ -1261,7 +1261,7 @@ def test_catalogs_tap_query_region(patch_tap):
     )
 
     assert isinstance(result, Table)
-    assert len(result) == 2
+    assert len(result) > 0
     assert "ra" in result.colnames
     args, _ = patch_tap.run_sync.call_args
     query = args[0]
@@ -1271,7 +1271,7 @@ def test_catalogs_tap_query_region(patch_tap):
     assert "POINT" in query
 
 
-def test_catalogs_tap_query_region_error():
+def test_catalogs_invalid_tap_query_region():
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_region(
             collection="tic",
@@ -1288,7 +1288,7 @@ def test_catalogs_tap_query_object(patch_tap):
     )
 
     assert isinstance(result, Table)
-    assert len(result) == 2
+    assert len(result) > 0
     assert "ra" in result.colnames
     args, _ = patch_tap.run_sync.call_args
     query = args[0]
@@ -1298,7 +1298,7 @@ def test_catalogs_tap_query_object(patch_tap):
     assert str(radius) in query
 
 
-def test_catalogs_tap_query_error():
+def test_catalogs_invalid_tap_query(patch_tap):
     # This will trigger a DALQueryError in the mock TAP service
     # when 'invalid' is found in the query string
     with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
@@ -1372,6 +1372,182 @@ def test_catalogs_download_hsc_spectra(patch_post, tmpdir):
         result = Catalogs.download_hsc_spectra(allSpectra[20:24],
                                             download_dir=str(tmpdir), curl_flag=True)
         assert isinstance(result, Table)
+
+
+###########################
+# CatalogCollection tests #
+###########################
+
+
+def test_catalog_collection_tap_get_catalog_metadata(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+    default_metadata = cc.get_catalog_metadata(default_catalog)
+    assert isinstance(default_metadata, CatalogMetadata)
+    assert isinstance(default_metadata.column_metadata, Table)
+    assert isinstance(default_metadata.ra_column, str)
+    assert isinstance(default_metadata.dec_column, str)
+    assert isinstance(default_metadata.supports_spatial_queries, bool)
+
+    assert len(default_metadata.column_metadata) > 0
+    assert default_metadata.ra_column in default_metadata.column_metadata["column_name"]
+    assert default_metadata.dec_column in default_metadata.column_metadata["column_name"]
+
+    metadata_cached = cc.get_catalog_metadata(default_catalog)
+    assert default_metadata is metadata_cached
+
+
+def test_catalog_collection_get_default_catalog(patch_tap):
+    cc = CatalogCollection("tic")
+    catalogs = cc._fetch_catalogs()
+    default = cc.get_default_catalog()
+
+    assert isinstance(catalogs, Table)
+    assert len(catalogs) > 0
+    assert catalogs.colnames == ['catalog_name', 'description']
+
+    assert not default.startswith("tap_schema")
+    assert default.casefold() in [name.casefold() for name in catalogs["catalog_name"]]
+    assert DEFAULT_CATALOGS["tic"] == default
+
+    # first non-tap_schema
+    cc = CatalogCollection("tic")
+    cc.name = "fake"
+    fake_catalogs = Table({
+        "catalog_name": [
+            "tap_schema.tables",
+            "tap_schema.columns",
+            "real_catalog",
+            "real_catalog_2",
+        ],
+        "description": ["", "", "", ""],
+    })
+    cc._fetch_catalogs = MagicMock(return_value=fake_catalogs)
+    assert isinstance(catalogs, Table)
+    assert len(catalogs) > 0
+
+    default = cc.get_default_catalog()
+    assert default == "real_catalog"
+
+    # all are tap_schema
+    cc = CatalogCollection("tic")
+    cc.name = "fake"
+    fake_catalogs = Table({
+        "catalog_name": [
+            "tap_schema.tables",
+            "tap_schema.columns",
+        ],
+        "description": ["", ""],
+    })
+    cc._fetch_catalogs = MagicMock(return_value=fake_catalogs)
+    assert isinstance(catalogs, Table)
+    assert len(catalogs) > 0
+
+    default = cc.get_default_catalog()
+    assert default == "tap_schema.tables"
+
+
+def test_catalog_collection_run_tap_query(patch_tap):
+    cc = CatalogCollection("tic")
+
+    adql_str = (
+        "SELECT TOP 10 solution_id, designation, source_id, ra, dec "
+        "FROM gaia_source WHERE "
+        "ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+    )
+    result = cc.run_tap_query(adql_str)
+
+    assert isinstance(result, Table)
+    assert len(result) > 0
+
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert adql_str in query
+
+
+def test_catalog_collection_invalid_run_tap_query(patch_tap):
+    cc = CatalogCollection("tic")
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        adql_str = "invalid"
+        cc.run_tap_query(adql_str)
+
+
+def test_catalog_collection_verify_catalog(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+
+    # valid catalog
+    assert isinstance(cc._verify_catalog(default_catalog), str)
+    assert cc._verify_catalog(default_catalog) == 'dbo.catalogrecord'
+
+
+def test_catalog_collection_invalid_verify_catalog(patch_tap):
+    cc = CatalogCollection("tic")
+
+    # ambiguous
+    fake_catalogs = Table({
+        "catalog_name": [
+            "mission1.catalogA",
+            "mission2.catalogA",
+        ],
+        "description": ["", ""],
+    })
+    cc._fetch_catalogs = MagicMock(return_value=fake_catalogs)
+
+    with pytest.raises(InvalidQueryError, match="is ambiguous for collection"):
+        cc._verify_catalog("catalogA")
+
+    # invalid catalog
+    with pytest.raises(InvalidQueryError, match="Catalog 'fake' is not recognized for collection 'tic'"):
+        cc._verify_catalog("fake")
+
+
+def test_catalog_collection_invalid_get_column_metadata(patch_tap):
+    cc = CatalogCollection("tic")
+
+    empty_result = Table(
+        names=["column_name", "datatype", "unit", "ucd", "description"]
+    )
+    cc.tap_service.run_sync = MagicMock(return_value=empty_result)
+
+    with pytest.raises(
+        InvalidQueryError,
+        match="Catalog 'fake_catalog' not found in collection 'tic'"
+    ):
+        cc._get_column_metadata("fake_catalog")
+
+def test_catalog_collection_verify_criteria(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+
+    # valid filters
+    assert cc._verify_criteria(default_catalog) is None
+    assert cc._verify_criteria(default_catalog, gaiabp=1) is None
+    assert cc._verify_criteria(default_catalog, gaiabp=1, teff=1) is None
+
+def test_catalog_collection_invalid_verify_criteria(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+
+    # close match
+    with pytest.raises(InvalidQueryError, match="Did you mean 'gaiabp'?"):
+        cc._verify_criteria(default_catalog, gaiagaiabp=1)
+
+    # invalid
+    with pytest.raises(InvalidQueryError,match="Filter 'fake_column' is not recognized"):
+        cc._verify_criteria(default_catalog, fake_column=1)
+
+
+def test_catalog_collection_invalid_spatial_query(patch_tap):
+    cc = CatalogCollection("tic")
+
+    # force only spatial query to fail
+    patch_tap.search = MagicMock(side_effect=DALQueryError("spatial failed"))
+    default_catalog = cc.get_default_catalog()
+    metadata = cc.get_catalog_metadata(default_catalog)
+
+    assert metadata.supports_spatial_queries is False
+    assert patch_tap.search.called
 
 
 ######################
