@@ -12,7 +12,8 @@ import astropy.units as u
 import pytest
 import numpy as np
 from astropy.table import Table, unique
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, Angle
+from regions import CircleSkyRegion, PolygonSkyRegion, PixCoord, CirclePixelRegion
 from astropy.io import fits
 from astropy.io.votable import parse
 from astropy.utils.exceptions import AstropyDeprecationWarning
@@ -24,6 +25,7 @@ from requests import HTTPError, Response
 
 from astroquery.mast import (Catalogs, MastMissions, Observations, Tesscut, Zcut, Mast, utils, services,
                              discovery_portal, auth, core)
+from ..catalog_collection import CatalogMetadata, CatalogCollection, DEFAULT_CATALOGS
 from astroquery.utils.mocks import MockResponse
 from astroquery.exceptions import (BlankResponseWarning, InvalidQueryError, InputWarning, MaxResultsWarning,
                                    NoResultsWarning, RemoteServiceError, ResolverError)
@@ -270,41 +272,10 @@ def vo_tap_mock():
 
     return mock_tap
 
+
 ###########################
 # MissionSearchClass Test #
 ###########################
-
-
-def test_catalogs_tap_query_region(patch_tap):
-    result = Catalogs.query_region(
-        regionCoords,
-        radius=0.002 * u.deg,
-        collection="tic"
-    )
-
-    assert isinstance(result, Table)
-    assert len(result) == 2
-    assert "ra" in result.colnames
-    # Inspect TAP query
-    args, kwargs = patch_tap.run_sync.call_args
-    query = args[0]
-
-    assert "FROM dbo.catalogrecord" in query
-    assert "CONTAINS" in query
-    assert "CIRCLE" in query
-    assert "POINT" in query
-
-
-def test_catalogs_tap_query_error(patch_tap):
-    # This will trigger a DALQueryError in the mock TAP service
-    # when 'invalid' is found in the query string
-    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
-        Catalogs.query_region(
-            regionCoords,
-            radius=0.002 * u.deg,
-            collection="tic",
-            allwise='invalid'
-        )
 
 
 def test_missions_query_region_async(patch_post):
@@ -1202,171 +1173,798 @@ def test_observations_get_cloud_uris_query(mock_client, patch_post):
                                     filter_products={'productSubGroupDescription': 'LC'})
 
 
-######################
-# CatalogClass tests #
-######################
+#######################
+# CatalogsClass tests #
+#######################
 
 
-def test_catalogs_query_region_async(patch_post):
-    responses = Catalogs.query_region_async(regionCoords, radius=0.002)
-    assert isinstance(responses, list)
+def test_catalogs_query_criteria(patch_tap):
+    # coordinates
+    result = Catalogs.query_criteria(
+        collection="tic",
+        coordinates=regionCoords,
+        radius=0.002 * u.deg,
+        limit=2,
+    )
 
-
-def test_catalogs_fabric_query_region_async(patch_post):
-    responses = Catalogs.query_region_async(regionCoords, radius=0.002, catalog="panstarrs", table="mean")
-    assert isinstance(responses, MockResponse)
-
-
-def test_catalogs_query_region(patch_post):
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg)
     assert isinstance(result, Table)
+    assert len(result) > 0
+    assert "dec" in result.colnames
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "CIRCLE" in query
+    assert "TOP 2" in query
 
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="hsc", version=2)
+    # region
+    result = Catalogs.query_criteria(
+        collection="tic",
+        region="Circle ICRS 202.4656816 +47.1999842 0.04",
+        radius=0.002 * u.deg,
+        offset=1,
+        sort_by="ra",
+    )
+
     assert isinstance(result, Table)
+    assert len(result) > 0
+    assert "dec" in result.colnames
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "CIRCLE" in query
+    assert "OFFSET" in query
+    assert "ORDER BY" in query
 
-    with pytest.warns(InputWarning) as i_w:
-        Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="hsc", version=5)
-    assert "Invalid HSC version number" in str(i_w[0].message)
+    # misc checks
+    assert isinstance(Catalogs.collection, CatalogCollection)
+    assert Catalogs.catalog == "dbo.SumMagAper2CatView"
+    catalogs = Catalogs.get_catalogs("tic")
+    assert isinstance(catalogs, Table)
 
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="galex")
-    assert isinstance(result, Table)
-
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="gaia", version=2)
-    assert isinstance(result, Table)
-
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="gaia", version=1)
-    assert isinstance(result, Table)
-
-    with pytest.warns(InputWarning) as i_w:
-        Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="gaia", version=5)
-    assert "Invalid Gaia version number" in str(i_w[0].message)
-
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="Sample")
-    assert isinstance(result, Table)
+    metadata = Catalogs.get_catalog_metadata(collection="tic")
+    assert isinstance(metadata, Table)
 
 
-def test_catalogs_fabric_query_region(patch_post):
-    result = Catalogs.query_region(regionCoords, radius=0.002 * u.deg, catalog="panstarrs", table="mean")
-    assert isinstance(result, Table)
-
-
-def test_catalogs_query_object_async(patch_post):
-    responses = Catalogs.query_object_async("M101", radius="0.002 deg")
-    assert isinstance(responses, list)
-
-
-def test_catalogs_fabric_query_object_async(patch_post):
-    responses = Catalogs.query_object_async("M101", radius="0.002 deg", catalog="panstarrs", table="mean")
-    assert isinstance(responses, MockResponse)
-
-
-def test_catalogs_query_object(patch_post):
-    result = Catalogs.query_object("M101", radius=".002 deg")
-    assert isinstance(result, Table)
-
-
-def test_catalogs_fabric_query_object(patch_post):
-    result = Catalogs.query_object("M101", radius=".002 deg", catalog="panstarrs", table="mean")
-    assert isinstance(result, Table)
-
-
-def test_catalogs_query_criteria_async(patch_post):
-    responses = Catalogs.query_criteria_async(catalog="Tic",
-                                              Bmag=[30, 50], objType="STAR")
-    assert isinstance(responses, list)
-
-    responses = Catalogs.query_criteria_async(catalog="Ctl",
-                                              Bmag=[30, 50], objType="STAR")
-    assert isinstance(responses, list)
-
-    responses = Catalogs.query_criteria_async(catalog="Tic", objectname="M10",
-                                              Bmag=[30, 50], objType="STAR")
-    assert isinstance(responses, list)
-
-    responses = Catalogs.query_criteria_async(catalog="DiskDetective",
-                                              objectname="M10", radius=2,
-                                              state="complete")
-    assert isinstance(responses, list)
-
-    responses = Catalogs.query_criteria_async(catalog="panstarrs", objectname="M10", radius=2,
-                                              table="mean", qualityFlag=48)
-    assert isinstance(responses, MockResponse)
-
+def test_catalogs_invalid_query_criteria(patch_tap):
+    #specifying both region and coordinates
     with pytest.raises(InvalidQueryError) as invalid_query:
-        Catalogs.query_criteria_async(catalog="Tic")
-    assert "non-positional" in str(invalid_query.value)
+        Catalogs.query_criteria(
+            collection="tic",
+            coordinates=regionCoords,
+            region="Circle ICRS 202.4656816 +47.1999842 0.04"
+        )
+        assert "Specify either `region` or `coordinates`" in invalid_query
 
+    #specifying both region and objectname
     with pytest.raises(InvalidQueryError) as invalid_query:
-        Catalogs.query_criteria_async(catalog="SampleFail")
-    assert "query not available" in str(invalid_query.value)
+        Catalogs.query_criteria(
+            collection="tic",
+            objectname="M31",
+            region="Circle ICRS 202.4656816 +47.1999842 0.04"
+        )
+        assert "Specify either `region` or `objectname`" in invalid_query
 
+    # named parameters and filters dict specifying criteria
     with pytest.raises(InvalidQueryError) as invalid_query:
-        Catalogs.query_criteria_async(catalog="panstarrs", objectname="M10", coordinates=regionCoords,
-                                      objType="STAR")
-    assert "one of objectname and coordinates" in str(invalid_query.value)
+        Catalogs.query_criteria(
+            collection="tic",
+            objectname="M31",
+            file_suffix=['A', 'B', '!C'],
+            filters = {
+                "file_suffix":['A', 'B', '!C'],
+            }
+        )
+        assert "Criteria specified both" in invalid_query
+
+    # sort_by cols and sort_desc different lengths
+    with pytest.raises(InvalidQueryError, match="must be 1 or equal to length of 'sort_by'"):
+        Catalogs.query_criteria(
+            collection="tic",
+            coordinates=regionCoords,
+            sort_by=["ra", "dec"],
+            sort_desc=[True, False, True]
+        )
+
+    # invalid sort col
+    with pytest.raises(InvalidQueryError, match="Sort column 'fake' not found in catalog"):
+        Catalogs.query_criteria(
+            collection="tic",
+            coordinates=regionCoords,
+            sort_by="fake",
+        )
 
 
-def test_catalogs_query_criteria(patch_post):
-    # without position
-    result = Catalogs.query_criteria(catalog="Tic",
-                                     Bmag=[30, 50], objType="STAR")
+def test_catalogs_query_region(patch_tap):
+    # passing region coords and radius
+    result = Catalogs.query_region(
+        regionCoords,
+        radius=0.002 * u.deg,
+        collection="tic"
+    )
 
     assert isinstance(result, Table)
+    assert len(result) > 0
+    assert "ra" in result.colnames
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "CIRCLE" in query
+    assert "POINT" in query
 
-    result = Catalogs.query_criteria(catalog="Ctl",
-                                     Bmag=[30, 50], objType="STAR")
 
-    assert isinstance(result, Table)
-
-    # with position
-    result = Catalogs.query_criteria(catalog="DiskDetective",
-                                     objectname="M10", radius=2,
-                                     state="complete")
-    assert isinstance(result, Table)
-
+def test_catalogs_invalid_query_region():
+    # query_region without region or coordinates
     with pytest.raises(InvalidQueryError) as invalid_query:
-        Catalogs.query_criteria(catalog="Tic", objectname="M10")
-    assert "non-positional" in str(invalid_query.value)
+        Catalogs.query_region(
+            collection="tic",
+        )
+        assert "Must specify either `region` or `coordinates`" in invalid_query
+
+
+def test_catalogs_query_object(patch_tap):
+    # object and radius query
+    radius = .001
+    result = Catalogs.query_object(
+        "M10",
+        radius=radius,
+        collection="TIC"
+    )
+
+    assert isinstance(result, Table)
+    assert len(result) > 0
+    assert "ra" in result.colnames
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "POINT" in query
+    assert str(radius) in query
 
 
 def test_catalogs_query_hsc_matchid_async(patch_post):
-    responses = Catalogs.query_hsc_matchid_async(82371983)
-    assert isinstance(responses, list)
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.query_hsc_matchid_async(82371983)
+        assert isinstance(responses, list)
 
-    responses = Catalogs.query_hsc_matchid_async(82371983, version=2)
-    assert isinstance(responses, list)
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.query_hsc_matchid_async(82371983, version=2)
+        assert isinstance(responses, list)
 
-    with pytest.warns(InputWarning) as i_w:
+    with pytest.warns((AstropyDeprecationWarning, InputWarning)) as record:
         Catalogs.query_hsc_matchid_async(82371983, version=5)
-    assert "Invalid HSC version number" in str(i_w[0].message)
+        messages = [str(w.message) for w in record]
+        assert any("This function is deprecated" in m for m in messages)
+        assert any("Invalid HSC version number" in m for m in messages)
 
 
 def test_catalogs_query_hsc_matchid(patch_post):
-    result = Catalogs.query_hsc_matchid(82371983)
-    assert isinstance(result, Table)
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        result = Catalogs.query_hsc_matchid(82371983)
+        assert isinstance(result, Table)
 
 
 def test_catalogs_get_hsc_spectra_async(patch_post):
-    responses = Catalogs.get_hsc_spectra_async()
-    assert isinstance(responses, list)
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.get_hsc_spectra_async()
+        assert isinstance(responses, list)
 
 
 def test_catalogs_get_hsc_spectra(patch_post):
-    result = Catalogs.get_hsc_spectra()
-    assert isinstance(result, Table)
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        result = Catalogs.get_hsc_spectra()
+        assert isinstance(result, Table)
 
 
 def test_catalogs_download_hsc_spectra(patch_post, tmpdir):
-    allSpectra = Catalogs.get_hsc_spectra()
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        allSpectra = Catalogs.get_hsc_spectra()
 
-    # actually download the products
-    result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
-    assert isinstance(result, Table)
+        # actually download the products
+        result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
+        assert isinstance(result, Table)
 
-    # just get the curl script
-    result = Catalogs.download_hsc_spectra(allSpectra[20:24],
-                                           download_dir=str(tmpdir), curl_flag=True)
+        # just get the curl script
+        result = Catalogs.download_hsc_spectra(allSpectra[20:24],
+                                            download_dir=str(tmpdir), curl_flag=True)
+        assert isinstance(result, Table)
+
+
+def test_catalogs_verify_collection(patch_tap):
+    valid = Catalogs._verify_collection("tic")
+    assert valid.lower() == "tic"
+
+    # renamed collection
+    renamed = list(Catalogs._renamed_collections.keys())[0]
+    new_name = Catalogs._renamed_collections[renamed]
+    with pytest.warns(InputWarning, match="has been renamed"):
+        result = Catalogs._verify_collection(renamed)
+        assert result == new_name
+
+    # invalid collection
+    with pytest.raises(InvalidQueryError, match="is not recognized"):
+        Catalogs._verify_collection("FAKE")
+
+    # no longer supported collection
+    if Catalogs._no_longer_supported_collections:
+        unsupported = list(Catalogs._no_longer_supported_collections)[0]
+        with pytest.raises(InvalidQueryError) as exc:
+            Catalogs._verify_collection(unsupported)
+        assert "no longer supported" in str(exc.value)
+
+
+def test_catalogs_parse_inputs(patch_tap):
+    collection_name = Catalogs.available_collections[0]
+    collection_obj, catalog = Catalogs._parse_inputs(collection=collection_name, catalog=None)
+    assert isinstance(collection_obj, CatalogCollection)
+    assert collection_obj.name == collection_name
+    assert catalog == collection_obj.default_catalog
+
+    # catalog paramter warning
+    with pytest.warns(DeprecationWarning, match="via the `catalog` parameter is deprecated."):
+        collection_name = Catalogs.available_collections[0]
+        collection_obj, catalog = Catalogs._parse_inputs(collection=None, catalog=collection_name)
+        assert isinstance(collection_obj, CatalogCollection)
+        assert catalog == collection_obj.default_catalog
+
+
+def test_catalogs_parse_select_cols(patch_tap):
+    catalog = Catalogs("tic")
+    column_metadata = catalog.get_catalog_metadata()
+    result = Catalogs._parse_select_cols(
+        ["ra", "dec"], 
+        column_metadata)
+    assert result == "ra, dec"
+
+    # close match suggestion
+    close_match_col = "gaiagaiabp"
+    with pytest.warns(InputWarning, match=" not found in catalog. Did you mean"):
+        result = Catalogs._parse_select_cols(
+            ["ra", close_match_col], 
+            column_metadata
+        )
+
+    # empty columns
+    with pytest.raises(InvalidQueryError, match="No valid columns specified in `select_cols`"):
+        result = Catalogs._parse_select_cols(
+            [], 
+            column_metadata
+        )
+    
+
+def test_catalogs_parse_legacy_pagination(patch_tap):
+    catalog = Catalogs("tic")
+    limit, offset = catalog._parse_legacy_pagination(
+        limit=5000,
+        offset=0,
+        pagesize=10,
+        page=None,
+    )
+    assert limit == 10
+    assert offset == 0
+
+    # missing pagesize
+    with pytest.warns(InputWarning, match="The 'page' parameter is ignored without 'pagesize'."):
+        catalog._parse_legacy_pagination(
+            limit=5000,
+            offset=0,
+            pagesize=None,
+            page=2,
+        )
+
+
+def test_catalogs_create_adql_region(patch_tap):
+    # string regions
+    Catalogs._create_adql_region(
+        region="Circle 202.4656816 +47.1999842 0.2"
+    )
+
+    Catalogs._create_adql_region(
+        region="Polygon ICRS 202.4656816 +47.1999842 202.5656816 +47.2999842 202.3656816 +47.0999842"
+    )
+
+    Catalogs._create_adql_region(
+        region="Polygon 202.4656816 +47.1999842 202.5656816 +47.2999842 202.3656816 +47.0999842"
+    )
+
+    # astropy region objects
+    cone_region = CircleSkyRegion(
+        center=SkyCoord(10.8, 6.5, unit="deg"),
+        radius=Angle(0.5, unit="deg")
+    )
+    Catalogs._create_adql_region(region=cone_region)
+
+    polygon_region = PolygonSkyRegion(
+        SkyCoord(
+            [57.376, 56.391, 56.025, 56.616],
+            [24.053, 24.622, 24.049, 24.291],
+            frame="icrs",
+            unit="deg",
+        )
+    )
+    Catalogs._create_adql_region(region=polygon_region)
+
+    # iterable coord pairs
+    Catalogs._create_adql_region(
+        region=[
+            (57.376, 24.053),
+            (56.391, 24.622),
+            (56.025, 24.049),
+            (56.616, 24.291)
+        ]
+    )
+
+
+def test_catalogs_invalid_create_adql_region(patch_tap):
+    # polygon without points
+    with pytest.raises(InvalidQueryError, match="Invalid POLYGON region string"):
+        Catalogs._create_adql_region(region="Polygon ICRS")
+
+    # polygon without sufficient points
+    with pytest.raises(InvalidQueryError, match="Invalid POLYGON region string"):
+        Catalogs._create_adql_region(region="Polygon ICRS 202.4656816 +47.1999842 202.5656816 +47.2999842")
+
+    # missing circle spec, frame not specified
+    with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
+        Catalogs._create_adql_region(region="CIRCLE 202.4656816 +47.1999842")
+
+    # missing circle spec, frame specified
+    with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
+        Catalogs._create_adql_region(region="CIRCLE ICRS 202.4656816 +47.1999842")
+
+    # invalid region str
+    with pytest.raises(ValueError, match="Unrecognized region string"):
+        Catalogs._create_adql_region(region="Badshape ICRS 202.4656816 +47.1999842 0.04")
+
+    # invalid list of coord pairs
+    with pytest.raises(ValueError, match="Invalid iterable region format"):
+        Catalogs._create_adql_region(
+            region=[57.376, 24.053, 56.391, 24.622, 56.025, 24.049, 56.616, 24.291]
+        )
+
+    # invalid astropy region
+    with pytest.raises(TypeError, match="Unsupported region type"):
+        Catalogs._create_adql_region(
+            region=CirclePixelRegion(PixCoord(x=42, y=43), 4.2)
+        )
+
+
+def test_catalogs_parse_numeric_expression(patch_tap):
+    # handling between
+    predicate = Catalogs._parse_numeric_expr("dec", "5..10")
+    assert predicate == "dec BETWEEN 5 AND 10"
+
+    # handling inequalitie
+    predicate = Catalogs._parse_numeric_expr("teff", "<1")
+    assert predicate == "teff < 1"
+
+    # handling specific values
+    predicate = Catalogs._parse_numeric_expr("gaiabp", "1")
+    assert predicate == "gaiabp = 1.0"
+
+    # passing not numeric str
+    with pytest.raises(InvalidQueryError, match="is numeric; unsupported value"):
+        Catalogs._parse_numeric_expr("dec", "notnumeric")
+
+
+def test_catalogs_format_scalar_predicate(patch_tap):
+    # handling bool
+    predicate = Catalogs._format_scalar_predicate(
+        "var", True, numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == 'var = 1'
+
+    # handling num
+    predicate = Catalogs._format_scalar_predicate(
+        "e_lum", 1, numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == 'e_lum = 1'
+
+    # handling str(num)
+    predicate = Catalogs._format_scalar_predicate(
+        "e_lum", "1", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == 'e_lum = 1.0'
+
+    # handling ! nots
+    predicate = Catalogs._format_scalar_predicate(
+        "e_lum", "!1", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == 'NOT (e_lum = 1.0)'
+
+    # handling wildcard *
+    predicate = Catalogs._format_scalar_predicate(
+        "var", "WILDCARD*", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == "var LIKE 'WILDCARD%'"
+
+    # handling wildcard * and nots
+    predicate = Catalogs._format_scalar_predicate(
+        "var", "!WILDCARD*", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == "NOT (var LIKE 'WILDCARD%')"
+
+    # handling wildcard %
+    predicate = Catalogs._format_scalar_predicate(
+        "var", "WILDCARD%", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == "var LIKE 'WILDCARD%'"
+
+    # handling wildcard % and nots
+    predicate = Catalogs._format_scalar_predicate(
+        "var", "!WILDCARD%", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
+    )
+    assert predicate == "NOT (var LIKE 'WILDCARD%')"
+
+
+def test_catalogs_combine_predicates(patch_tap):
+    # no predicates 
+    result = Catalogs._combine_predicates([], [])
+    assert result == ""
+
+    # one positive predicate
+    result = Catalogs._combine_predicates(["ra > 5"], [])
+    assert result == "ra > 5"
+
+    # multiple positive predicate
+    result = Catalogs._combine_predicates(
+        ["ra > 5", "dec < 0"],
+        []
+    )
+    assert result == "(ra > 5 OR dec < 0)"
+
+    # multiple negative predicates
+    result = Catalogs._combine_predicates(
+        [],
+        ["ra != 5", "dec != 0"]
+    )
+    assert result == "ra != 5 AND dec != 0"
+
+    # multiple positive and negative predicates
+    result = Catalogs._combine_predicates(
+        ["ra > 5", "dec < 0"],
+        ["ra != 10"]
+    )
+    assert result == "(ra != 10) AND (ra > 5 OR dec < 0)"
+
+
+def test_catalogs_build_numeric_list_predicate(patch_tap):
+    # multiple positive nums
+    result = Catalogs._build_numeric_list_predicate(
+        "ra",
+        pos_items=[1, 2, 3],
+        neg_items=[]
+    )
+    assert result == "ra IN (1, 2, 3)"
+
+    # multiple positive bools
+    result = Catalogs._build_numeric_list_predicate(
+        "tessflag",
+        pos_items=[True, False],
+        neg_items=[]
+    )
+    assert result == "tessflag IN (1, 0)"
+
+    # multiple positive inequalities and ranges
+    result = Catalogs._build_numeric_list_predicate(
+        "dec",
+        pos_items=["<5", "10..20"],
+        neg_items=[]
+    )
+    assert "< 5" in result
+    assert "BETWEEN 10 AND 20" in result
+
+    # single positive num
+    result = Catalogs._build_numeric_list_predicate(
+        "ra",
+        pos_items=[np.int64(7)],
+        neg_items=[]
+    )
+    assert "ra IN (7)" in result
+
+
+def test_catalogs_build_string_list_predicate(patch_tap):
+    # multiple positive strs
+    result = Catalogs._build_string_list_predicate(
+        "var",
+        pos_items=["str", "str"],
+        neg_items=[]
+    )
+    assert result == "var IN ('str', 'str')"
+
+    # multiple positive bools
+    result = Catalogs._build_string_list_predicate(
+        "var",
+        pos_items=[True, False],
+        neg_items=[]
+    )
+    assert result == "var IN (1, 0)"
+
+    # multiple positive strs with wildcard
+    result = Catalogs._build_string_list_predicate(
+        "var",
+        pos_items= ["WILDCARD%", "str"],
+        neg_items=[]
+    )
+    assert "var IN ('str')" in result
+    assert "LIKE 'WILDCARD%" in result
+    assert "OR" in result
+
+    # multiple positive nums
+    result = Catalogs._build_string_list_predicate(
+        "var",
+        pos_items=[1, 0],
+        neg_items=[]
+    )
+    assert result == "var IN (1, 0)"
+
+
+def test_catalogs_format_criteria_conditions(patch_tap):
+    # multiple numeric cols and singular criteria
+    criteria = {"ra": 5, "dec": 10}
+    result = Catalogs._format_criteria_conditions(
+        CatalogCollection("tic"),
+        "dbo.catalogrecord",
+        criteria
+    )
+    assert result == ["ra = 5", "dec = 10"]
+
+    # str cols and singular criteria
+    criteria = {"obj_type": "STAR"}
+    result = Catalogs._format_criteria_conditions(
+        CatalogCollection("tic"),
+        "dbo.catalogrecord",
+        criteria
+    )
+    assert result == ["obj_type = 'STAR'"]
+
+    # multiple cols and multiple criteria
+    criteria = {"ra": [1, 2, 3], "dec": [">5", "<10"]}
+    result = Catalogs._format_criteria_conditions(
+        CatalogCollection("tic"),
+        "dbo.catalogrecord",
+        criteria
+    )
+    assert any("ra IN" in r or "ra >" in r for r in result)
+    assert any("dec <" in r or "dec >" in r for r in result)
+
+    # str cols and multiple criteria
+    criteria = {"obj_type": ["STAR", "!GALAXY"]}
+    result = Catalogs._format_criteria_conditions(
+        CatalogCollection("tic"),
+        "dbo.catalogrecord",
+        criteria
+    )
+    assert any("NOT" in r for r in result)
+    assert any("STAR" in r for r in result)
+
+    # empty criteria
+    criteria = {"ra": []}
+    result = Catalogs._format_criteria_conditions(
+        CatalogCollection("tic"),
+        "dbo.catalogrecord",
+        criteria
+    )
+    assert result == ["1=0"]
+
+
+def test_catalogs_invalid_tap_query(patch_tap):
+    # This will trigger a DALQueryError in the mock TAP service
+    # when 'invalid' is found in the query string
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        Catalogs.query_criteria(
+            collection="tic",
+            coordinates=regionCoords,
+            radius=0.002 * u.deg,
+            allwise='invalid'
+        )
+
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        Catalogs.query_region(
+            regionCoords,
+            radius=0.002 * u.deg,
+            collection="tic",
+            allwise='invalid'
+        )
+
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        Catalogs.query_object(
+            "M10",
+            radius=.001,
+            collection="TIC",
+            allwise='invalid'
+        )
+
+
+def test_catalogs_invalid_spatial_query(patch_tap):
+    # force spatial query to fail
+    patch_tap.search = MagicMock(side_effect=DALQueryError("spatial failed"))
+    with pytest.raises(InvalidQueryError, match="does not support spatial queries"):
+        Catalogs.query_criteria(
+            collection="tic",
+            coordinates=regionCoords,
+            radius=0.002 * u.deg,
+        )
+
+
+###########################
+# CatalogCollection tests #
+###########################
+
+
+def test_catalog_collection_tap_get_catalog_metadata(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+    default_metadata = cc.get_catalog_metadata(default_catalog)
+    assert isinstance(default_metadata, CatalogMetadata)
+    assert isinstance(default_metadata.column_metadata, Table)
+    assert isinstance(default_metadata.ra_column, str)
+    assert isinstance(default_metadata.dec_column, str)
+    assert isinstance(default_metadata.supports_spatial_queries, bool)
+
+    assert len(default_metadata.column_metadata) > 0
+    assert default_metadata.ra_column in default_metadata.column_metadata["column_name"]
+    assert default_metadata.dec_column in default_metadata.column_metadata["column_name"]
+
+    metadata_cached = cc.get_catalog_metadata(default_catalog)
+    assert default_metadata is metadata_cached
+
+
+def test_catalog_collection_get_default_catalog(patch_tap):
+    cc = CatalogCollection("tic")
+    catalogs = cc._fetch_catalogs()
+    default = cc.get_default_catalog()
+
+    assert isinstance(catalogs, Table)
+    assert len(catalogs) > 0
+    assert catalogs.colnames == ['catalog_name', 'description']
+
+    assert not default.startswith("tap_schema")
+    assert default.casefold() in [name.casefold() for name in catalogs["catalog_name"]]
+    assert DEFAULT_CATALOGS["tic"] == default
+
+    # first non-tap_schema
+    cc = CatalogCollection("tic")
+    cc.name = "fake"
+    fake_catalogs = Table({
+        "catalog_name": [
+            "tap_schema.tables",
+            "tap_schema.columns",
+            "real_catalog",
+            "real_catalog_2",
+        ],
+        "description": ["", "", "", ""],
+    })
+    cc._fetch_catalogs = MagicMock(return_value=fake_catalogs)
+    assert isinstance(catalogs, Table)
+    assert len(catalogs) > 0
+
+    default = cc.get_default_catalog()
+    assert default == "real_catalog"
+
+    # all are tap_schema
+    cc = CatalogCollection("tic")
+    cc.name = "fake"
+    fake_catalogs = Table({
+        "catalog_name": [
+            "tap_schema.tables",
+            "tap_schema.columns",
+        ],
+        "description": ["", ""],
+    })
+    cc._fetch_catalogs = MagicMock(return_value=fake_catalogs)
+    assert isinstance(catalogs, Table)
+    assert len(catalogs) > 0
+
+    default = cc.get_default_catalog()
+    assert default == "tap_schema.tables"
+
+
+def test_catalog_collection_run_tap_query(patch_tap):
+    cc = CatalogCollection("tic")
+
+    adql_str = (
+        "SELECT TOP 10 solution_id, designation, source_id, ra, dec "
+        "FROM gaia_source WHERE "
+        "ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+    )
+    result = cc.run_tap_query(adql_str)
+
     assert isinstance(result, Table)
+    assert len(result) > 0
+
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert adql_str in query
+
+
+def test_catalog_collection_invalid_run_tap_query(patch_tap):
+    cc = CatalogCollection("tic")
+    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+        adql_str = "invalid"
+        cc.run_tap_query(adql_str)
+
+
+def test_catalog_collection_verify_catalog(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+
+    # valid catalog
+    assert isinstance(cc._verify_catalog(default_catalog), str)
+    assert cc._verify_catalog(default_catalog) == 'dbo.catalogrecord'
+
+
+def test_catalog_collection_invalid_verify_catalog(patch_tap):
+    cc = CatalogCollection("tic")
+
+    # ambiguous
+    fake_catalogs = Table({
+        "catalog_name": [
+            "mission1.catalogA",
+            "mission2.catalogA",
+        ],
+        "description": ["", ""],
+    })
+    cc._fetch_catalogs = MagicMock(return_value=fake_catalogs)
+
+    with pytest.raises(InvalidQueryError, match="is ambiguous for collection"):
+        cc._verify_catalog("catalogA")
+
+    # invalid catalog
+    with pytest.raises(InvalidQueryError, match="Catalog 'fake' is not recognized for collection 'tic'"):
+        cc._verify_catalog("fake")
+
+
+def test_catalog_collection_invalid_get_column_metadata(patch_tap):
+    cc = CatalogCollection("tic")
+
+    empty_result = Table(
+        names=["column_name", "datatype", "unit", "ucd", "description"]
+    )
+    cc.tap_service.run_sync = MagicMock(return_value=empty_result)
+
+    with pytest.raises(
+        InvalidQueryError,
+        match="Catalog 'fake_catalog' not found in collection 'tic'"
+    ):
+        cc._get_column_metadata("fake_catalog")
+
+def test_catalog_collection_verify_criteria(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+
+    # valid filters
+    assert cc._verify_criteria(default_catalog) is None
+    assert cc._verify_criteria(default_catalog, gaiabp=1) is None
+    assert cc._verify_criteria(default_catalog, gaiabp=1, teff=1) is None
+
+def test_catalog_collection_invalid_verify_criteria(patch_tap):
+    cc = CatalogCollection("tic")
+    default_catalog = cc.get_default_catalog()
+
+    close_match_col = "gaiagaiabp"
+    with pytest.raises(InvalidQueryError, match=f"Filter '{close_match_col}' is not recognized for collection "
+                           f"'{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?"):
+            cc._verify_criteria(default_catalog, gaiagaiabp=1)
+
+    invalid_col = "fake_column"
+    with pytest.raises(InvalidQueryError, match=f"Filter '{invalid_col}' is not recognized for collection "
+                        f"'{cc.name}' and catalog '{default_catalog}'."):
+        cc._verify_criteria(default_catalog, fake_column=1)
+
+
+def test_catalog_collection_invalid_spatial_query(patch_tap):
+    cc = CatalogCollection("tic")
+
+    # force only spatial query to fail
+    patch_tap.search = MagicMock(side_effect=DALQueryError("spatial failed"))
+    default_catalog = cc.get_default_catalog()
+    metadata = cc.get_catalog_metadata(default_catalog)
+
+    assert metadata.supports_spatial_queries is False
+    assert patch_tap.search.called
 
 
 ######################

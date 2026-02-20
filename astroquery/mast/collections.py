@@ -927,8 +927,6 @@ class CatalogsClass(MastQueryWithLogin):
                 try:
                     float(parts[1])
                     # Format: CIRCLE ra dec radius
-                    if len(parts) < 4:
-                        raise InvalidQueryError(f"Invalid CIRCLE region string: {region}")
                     ra, dec, radius = parts[1], parts[2], parts[3]
                 except ValueError:
                     # Format: CIRCLE FRAME ra dec radius
@@ -1123,16 +1121,15 @@ class CatalogsClass(MastQueryWithLogin):
         simple_numbers = []
         complex_parts = []
         for val in pos_items:
-            if isinstance(val, (int, float)):
-                simple_numbers.append(val)
-            elif isinstance(val, bool):
+            if isinstance(val, bool):
                 simple_numbers.append(int(val))
+            elif isinstance(val, (int, float)):
+                simple_numbers.append(val)
             elif isinstance(val, str):
-                parsed = self._parse_numeric_expr(col, val)
-                if 'BETWEEN' in parsed or '<' in parsed or '>' in parsed:
-                    complex_parts.append(parsed)
-                else:
+                try:
                     simple_numbers.append(float(val))
+                except ValueError:
+                    complex_parts.append(self._parse_numeric_expr(col, val))
             else:
                 simple_numbers.append(val)
 
