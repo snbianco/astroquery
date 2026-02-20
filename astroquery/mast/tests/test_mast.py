@@ -1178,7 +1178,7 @@ def test_observations_get_cloud_uris_query(mock_client, patch_post):
 ######################
 
 
-def test_catalogs_tap_query_criteria(patch_tap):
+def test_catalogs_query_criteria(patch_tap):
     # coordinates
     result = Catalogs.query_criteria(
         collection="tic",
@@ -1202,7 +1202,8 @@ def test_catalogs_tap_query_criteria(patch_tap):
         collection="tic",
         region="Circle ICRS 202.4656816 +47.1999842 0.04",
         radius=0.002 * u.deg,
-        offset=1
+        offset=1,
+        sort_by="ra",
     )
 
     assert isinstance(result, Table)
@@ -1214,6 +1215,7 @@ def test_catalogs_tap_query_criteria(patch_tap):
     assert "CONTAINS" in query
     assert "CIRCLE" in query
     assert "OFFSET" in query
+    assert "ORDER BY" in query
 
     # misc checks
     assert isinstance(Catalogs.collection, CatalogCollection)
@@ -1225,7 +1227,7 @@ def test_catalogs_tap_query_criteria(patch_tap):
     assert isinstance(metadata, Table)
 
 
-def test_catalogs_invalid_tap_query_criteria(patch_tap):
+def test_catalogs_invalid_query_criteria(patch_tap):
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
@@ -1266,6 +1268,178 @@ def test_catalogs_invalid_tap_query_criteria(patch_tap):
             collection="tic",
             coordinates=regionCoords,
             sort_by="fake",
+        )
+
+
+def test_catalogs_query_region(patch_tap):
+    result = Catalogs.query_region(
+        regionCoords,
+        radius=0.002 * u.deg,
+        collection="tic"
+    )
+
+    assert isinstance(result, Table)
+    assert len(result) > 0
+    assert "ra" in result.colnames
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "CIRCLE" in query
+    assert "POINT" in query
+
+
+def test_catalogs_invalid_query_region():
+    with pytest.raises(InvalidQueryError) as invalid_query:
+        Catalogs.query_region(
+            collection="tic",
+        )
+        assert "Must specify either `region` or `coordinates`" in invalid_query
+
+
+def test_catalogs_query_object(patch_tap):
+    radius = .001
+    result = Catalogs.query_object(
+        "M10",
+        radius=radius,
+        collection="TIC"
+    )
+
+    assert isinstance(result, Table)
+    assert len(result) > 0
+    assert "ra" in result.colnames
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert "FROM dbo.catalogrecord" in query
+    assert "CONTAINS" in query
+    assert "POINT" in query
+    assert str(radius) in query
+
+
+def test_catalogs_query_hsc_matchid_async(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.query_hsc_matchid_async(82371983)
+        assert isinstance(responses, list)
+
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.query_hsc_matchid_async(82371983, version=2)
+        assert isinstance(responses, list)
+
+    with pytest.warns((AstropyDeprecationWarning, InputWarning)) as record:
+        Catalogs.query_hsc_matchid_async(82371983, version=5)
+        messages = [str(w.message) for w in record]
+        assert any("This function is deprecated" in m for m in messages)
+        assert any("Invalid HSC version number" in m for m in messages)
+
+
+def test_catalogs_query_hsc_matchid(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        result = Catalogs.query_hsc_matchid(82371983)
+        assert isinstance(result, Table)
+
+
+def test_catalogs_get_hsc_spectra_async(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.get_hsc_spectra_async()
+        assert isinstance(responses, list)
+
+
+def test_catalogs_get_hsc_spectra(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        result = Catalogs.get_hsc_spectra()
+        assert isinstance(result, Table)
+
+
+def test_catalogs_download_hsc_spectra(patch_post, tmpdir):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        allSpectra = Catalogs.get_hsc_spectra()
+
+        # actually download the products
+        result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
+        assert isinstance(result, Table)
+
+        # just get the curl script
+        result = Catalogs.download_hsc_spectra(allSpectra[20:24],
+                                            download_dir=str(tmpdir), curl_flag=True)
+        assert isinstance(result, Table)
+
+
+def test_catalogs_verify_collection(patch_tap):
+    valid = Catalogs._verify_collection("tic")
+    assert valid.lower() == "tic"
+
+    renamed = list(Catalogs._renamed_collections.keys())[0]
+    new_name = Catalogs._renamed_collections[renamed]
+    with pytest.warns(InputWarning, match="has been renamed"):
+        result = Catalogs._verify_collection(renamed)
+        assert result == new_name
+
+    with pytest.raises(InvalidQueryError) as exc:
+        Catalogs._verify_collection("FAKECOL")
+        assert "is not recognized" in str(exc.value) or "Did you mean" in str(exc.value)
+
+    if Catalogs._no_longer_supported_collections:
+        unsupported = list(Catalogs._no_longer_supported_collections)[0]
+        with pytest.raises(InvalidQueryError) as exc:
+            Catalogs._verify_collection(unsupported)
+        assert "no longer supported" in str(exc.value)
+
+
+def test_catalogs_parse_inputs(patch_tap):
+    collection_name = Catalogs.available_collections[0]
+    collection_obj, catalog = Catalogs._parse_inputs(collection=collection_name, catalog=None)
+    assert isinstance(collection_obj, CatalogCollection)
+    assert collection_obj.name == collection_name
+    assert catalog == collection_obj.default_catalog
+
+
+def test_catalogs_invalid_parse_inputs(patch_tap):
+    with pytest.warns(DeprecationWarning, match="via the `catalog` parameter is deprecated."):
+        collection_name = Catalogs.available_collections[0]
+        collection_obj, catalog = Catalogs._parse_inputs(collection=None, catalog=collection_name)
+        assert isinstance(collection_obj, CatalogCollection)
+        assert catalog == collection_obj.default_catalog
+
+
+def test_catalogs_parse_select_cols(patch_tap):
+    catalog = Catalogs("tic")
+    column_metadata = catalog.get_catalog_metadata()
+    result = Catalogs._parse_select_cols(
+        ["ra", "dec"], 
+        column_metadata)
+    assert result == "ra, dec"
+
+    close_match_col = "gaiagaiabp"
+    with pytest.warns(InputWarning, match=" not found in catalog. Did you mean"):
+        result = Catalogs._parse_select_cols(
+            ["ra", close_match_col], 
+            column_metadata
+        )
+
+    with pytest.raises(InvalidQueryError, match="No valid columns specified in `select_cols`"):
+        result = Catalogs._parse_select_cols(
+            [], 
+            column_metadata
+        )
+    
+
+def test_catalogs_parse_legacy_pagination(patch_tap):
+    catalog = Catalogs("tic")
+    limit, offset = catalog._parse_legacy_pagination(
+        limit=5000,
+        offset=0,
+        pagesize=10,
+        page=None,
+    )
+    assert limit == 10
+    assert offset == 0
+
+    with pytest.warns(InputWarning, match="The 'page' parameter is ignored without 'pagesize'."):
+        catalog._parse_legacy_pagination(
+            limit=5000,
+            offset=0,
+            pagesize=None,
+            page=2,
         )
 
 
@@ -1318,14 +1492,9 @@ def test_catalogs_invalid_create_adql_region(patch_tap):
     with pytest.raises(InvalidQueryError, match="Invalid POLYGON region string"):
         Catalogs._create_adql_region(region="Polygon ICRS 202.4656816 +47.1999842 202.5656816 +47.2999842")
 
-    # line 924
     with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
         Catalogs._create_adql_region(region="CIRCLE 202.4656816 +47.1999842")
 
-    #with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
-    #    Catalogs._create_adql_region(region="CIRCLE 123.4 -22.5 0.2")
-
-    #line 936
     with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
         Catalogs._create_adql_region(region="CIRCLE ICRS 202.4656816 +47.1999842")
 
@@ -1341,20 +1510,6 @@ def test_catalogs_invalid_create_adql_region(patch_tap):
         Catalogs._create_adql_region(
             region=CirclePixelRegion(PixCoord(x=42, y=43), 4.2)
         )
-
-
-def test_catalogs_parse_numeric_expression(patch_tap):
-    predicate = Catalogs._parse_numeric_expr("dec", "5..10")
-    assert predicate == "dec BETWEEN 5 AND 10"
-
-    predicate = Catalogs._parse_numeric_expr("teff", "<1")
-    assert predicate == "teff < 1"
-
-    predicate = Catalogs._parse_numeric_expr("gaiabp", "1")
-    assert predicate == "gaiabp = 1.0"
-
-    with pytest.raises(InvalidQueryError, match="is numeric; unsupported value"):
-        Catalogs._parse_numeric_expr("dec", "notnumeric")
 
 
 def test_catalogs_parse_numeric_expression(patch_tap):
@@ -1558,51 +1713,6 @@ def test_catalogs_format_criteria_conditions(patch_tap):
     assert result == ["1=0"]
 
 
-def test_catalogs_tap_query_region(patch_tap):
-    result = Catalogs.query_region(
-        regionCoords,
-        radius=0.002 * u.deg,
-        collection="tic"
-    )
-
-    assert isinstance(result, Table)
-    assert len(result) > 0
-    assert "ra" in result.colnames
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
-    assert "FROM dbo.catalogrecord" in query
-    assert "CONTAINS" in query
-    assert "CIRCLE" in query
-    assert "POINT" in query
-
-
-def test_catalogs_invalid_tap_query_region():
-    with pytest.raises(InvalidQueryError) as invalid_query:
-        Catalogs.query_region(
-            collection="tic",
-        )
-        assert "Must specify either `region` or `coordinates`" in invalid_query
-
-
-def test_catalogs_tap_query_object(patch_tap):
-    radius = .001
-    result = Catalogs.query_object(
-        "M10",
-        radius=radius,
-        collection="TIC"
-    )
-
-    assert isinstance(result, Table)
-    assert len(result) > 0
-    assert "ra" in result.colnames
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
-    assert "FROM dbo.catalogrecord" in query
-    assert "CONTAINS" in query
-    assert "POINT" in query
-    assert str(radius) in query
-
-
 def test_catalogs_invalid_tap_query(patch_tap):
     # This will trigger a DALQueryError in the mock TAP service
     # when 'invalid' is found in the query string
@@ -1629,97 +1739,6 @@ def test_catalogs_invalid_tap_query(patch_tap):
             collection="TIC",
             allwise='invalid'
         )
-
-
-def test_catalogs_query_hsc_matchid_async(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        responses = Catalogs.query_hsc_matchid_async(82371983)
-        assert isinstance(responses, list)
-
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        responses = Catalogs.query_hsc_matchid_async(82371983, version=2)
-        assert isinstance(responses, list)
-
-    with pytest.warns((AstropyDeprecationWarning, InputWarning)) as record:
-        Catalogs.query_hsc_matchid_async(82371983, version=5)
-        messages = [str(w.message) for w in record]
-        assert any("This function is deprecated" in m for m in messages)
-        assert any("Invalid HSC version number" in m for m in messages)
-
-
-def test_catalogs_query_hsc_matchid(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        result = Catalogs.query_hsc_matchid(82371983)
-        assert isinstance(result, Table)
-
-
-def test_catalogs_get_hsc_spectra_async(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        responses = Catalogs.get_hsc_spectra_async()
-        assert isinstance(responses, list)
-
-
-def test_catalogs_get_hsc_spectra(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        result = Catalogs.get_hsc_spectra()
-        assert isinstance(result, Table)
-
-
-def test_catalogs_download_hsc_spectra(patch_post, tmpdir):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        allSpectra = Catalogs.get_hsc_spectra()
-
-        # actually download the products
-        result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
-        assert isinstance(result, Table)
-
-        # just get the curl script
-        result = Catalogs.download_hsc_spectra(allSpectra[20:24],
-                                            download_dir=str(tmpdir), curl_flag=True)
-        assert isinstance(result, Table)
-
-
-def test_catalogs_verify_collection(patch_tap):
-    valid = Catalogs._verify_collection("tic")
-    assert valid.lower() == "tic"
-
-    renamed = list(Catalogs._renamed_collections.keys())[0]
-    new_name = Catalogs._renamed_collections[renamed]
-    with pytest.warns(InputWarning, match="has been renamed"):
-        result = Catalogs._verify_collection(renamed)
-        assert result == new_name
-
-    with pytest.raises(InvalidQueryError) as exc:
-        Catalogs._verify_collection("FAKECOL")
-        assert "is not recognized" in str(exc.value) or "Did you mean" in str(exc.value)
-
-    if Catalogs._no_longer_supported_collections:
-        unsupported = list(Catalogs._no_longer_supported_collections)[0]
-        with pytest.raises(InvalidQueryError) as exc:
-            Catalogs._verify_collection(unsupported)
-        assert "no longer supported" in str(exc.value)
-
-
-def test_catalogs_parse_inputs(patch_tap):
-    collection_name = Catalogs.available_collections[0]
-    collection_obj, catalog = Catalogs._parse_inputs(collection=collection_name, catalog=None)
-    assert isinstance(collection_obj, CatalogCollection)
-    assert collection_obj.name == collection_name
-    assert catalog == collection_obj.default_catalog
-
-
-def test_catalogs_invalid_parse_inputs(patch_tap):
-    with pytest.warns(DeprecationWarning, match="via the `catalog` parameter is deprecated."):
-        collection_name = Catalogs.available_collections[0]
-        collection_obj, catalog = Catalogs._parse_inputs(collection=None, catalog=collection_name)
-        assert isinstance(collection_obj, CatalogCollection)
-        assert catalog == collection_obj.default_catalog
-
-
-def test_parse_select_cols_all_valid(patch_tap):
-    patch_tap.column_metadata['column_name'] = ['ra', 'dec', 'mag']
-    result = Catalogs._parse_select_cols(['ra', 'mag'], patch_tap.column_metadata)
-    assert result == 'ra, mag'
 
 
 def test_catalogs_invalid_spatial_query(patch_tap):
