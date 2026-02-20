@@ -1401,9 +1401,9 @@ def test_observations_get_cloud_uris_query(mock_client, patch_post):
     Observations.disable_cloud_dataset()
 
 
-######################
-# CatalogClass tests #
-######################
+#######################
+# CatalogsClass tests #
+#######################
 
 
 def test_catalogs_query_criteria(patch_tap):
@@ -1456,6 +1456,7 @@ def test_catalogs_query_criteria(patch_tap):
 
 
 def test_catalogs_invalid_query_criteria(patch_tap):
+    #specifying both region and coordinates
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
@@ -1464,6 +1465,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
         )
         assert "Specify either `region` or `coordinates`" in invalid_query
 
+    #specifying both region and objectname
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
@@ -1472,6 +1474,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
         )
         assert "Specify either `region` or `objectname`" in invalid_query
 
+    # named parameters and filters dict specifying criteria
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
@@ -1483,6 +1486,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
         )
         assert "Criteria specified both" in invalid_query
 
+    # sort_by cols and sort_desc different lengths
     with pytest.raises(InvalidQueryError, match="must be 1 or equal to length of 'sort_by'"):
         Catalogs.query_criteria(
             collection="tic",
@@ -1491,6 +1495,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
             sort_desc=[True, False, True]
         )
 
+    # invalid sort col
     with pytest.raises(InvalidQueryError, match="Sort column 'fake' not found in catalog"):
         Catalogs.query_criteria(
             collection="tic",
@@ -1500,6 +1505,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
 
 
 def test_catalogs_query_region(patch_tap):
+    # passing region coords and radius
     result = Catalogs.query_region(
         regionCoords,
         radius=0.002 * u.deg,
@@ -1518,6 +1524,7 @@ def test_catalogs_query_region(patch_tap):
 
 
 def test_catalogs_invalid_query_region():
+    # query_region without region or coordinates
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_region(
             collection="tic",
@@ -1526,6 +1533,7 @@ def test_catalogs_invalid_query_region():
 
 
 def test_catalogs_query_object(patch_tap):
+    # object and radius query
     radius = .001
     result = Catalogs.query_object(
         "M10",
@@ -1596,16 +1604,18 @@ def test_catalogs_verify_collection(patch_tap):
     valid = Catalogs._verify_collection("tic")
     assert valid.lower() == "tic"
 
+    # renamed collection
     renamed = list(Catalogs._renamed_collections.keys())[0]
     new_name = Catalogs._renamed_collections[renamed]
     with pytest.warns(InputWarning, match="has been renamed"):
         result = Catalogs._verify_collection(renamed)
         assert result == new_name
 
-    with pytest.raises(InvalidQueryError) as exc:
-        Catalogs._verify_collection("FAKECOL")
-        assert "is not recognized" in str(exc.value) or "Did you mean" in str(exc.value)
+    # invalid collection
+    with pytest.raises(InvalidQueryError, match="is not recognized"):
+        Catalogs._verify_collection("FAKE")
 
+    # no longer supported collection
     if Catalogs._no_longer_supported_collections:
         unsupported = list(Catalogs._no_longer_supported_collections)[0]
         with pytest.raises(InvalidQueryError) as exc:
@@ -1620,8 +1630,7 @@ def test_catalogs_parse_inputs(patch_tap):
     assert collection_obj.name == collection_name
     assert catalog == collection_obj.default_catalog
 
-
-def test_catalogs_invalid_parse_inputs(patch_tap):
+    # catalog paramter warning
     with pytest.warns(DeprecationWarning, match="via the `catalog` parameter is deprecated."):
         collection_name = Catalogs.available_collections[0]
         collection_obj, catalog = Catalogs._parse_inputs(collection=None, catalog=collection_name)
@@ -1637,6 +1646,7 @@ def test_catalogs_parse_select_cols(patch_tap):
         column_metadata)
     assert result == "ra, dec"
 
+    # close match suggestion
     close_match_col = "gaiagaiabp"
     with pytest.warns(InputWarning, match=" not found in catalog. Did you mean"):
         result = Catalogs._parse_select_cols(
@@ -1644,6 +1654,7 @@ def test_catalogs_parse_select_cols(patch_tap):
             column_metadata
         )
 
+    # empty columns
     with pytest.raises(InvalidQueryError, match="No valid columns specified in `select_cols`"):
         result = Catalogs._parse_select_cols(
             [], 
@@ -1662,6 +1673,7 @@ def test_catalogs_parse_legacy_pagination(patch_tap):
     assert limit == 10
     assert offset == 0
 
+    # missing pagesize
     with pytest.warns(InputWarning, match="The 'page' parameter is ignored without 'pagesize'."):
         catalog._parse_legacy_pagination(
             limit=5000,
@@ -1714,26 +1726,33 @@ def test_catalogs_create_adql_region(patch_tap):
 
 
 def test_catalogs_invalid_create_adql_region(patch_tap):
+    # polygon without points
     with pytest.raises(InvalidQueryError, match="Invalid POLYGON region string"):
         Catalogs._create_adql_region(region="Polygon ICRS")
 
+    # polygon without sufficient points
     with pytest.raises(InvalidQueryError, match="Invalid POLYGON region string"):
         Catalogs._create_adql_region(region="Polygon ICRS 202.4656816 +47.1999842 202.5656816 +47.2999842")
 
+    # missing circle spec, frame not specified
     with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
         Catalogs._create_adql_region(region="CIRCLE 202.4656816 +47.1999842")
 
+    # missing circle spec, frame specified
     with pytest.raises(InvalidQueryError, match="Invalid CIRCLE region string"):
         Catalogs._create_adql_region(region="CIRCLE ICRS 202.4656816 +47.1999842")
 
+    # invalid region str
     with pytest.raises(ValueError, match="Unrecognized region string"):
         Catalogs._create_adql_region(region="Badshape ICRS 202.4656816 +47.1999842 0.04")
 
+    # invalid list of coord pairs
     with pytest.raises(ValueError, match="Invalid iterable region format"):
         Catalogs._create_adql_region(
             region=[57.376, 24.053, 56.391, 24.622, 56.025, 24.049, 56.616, 24.291]
         )
 
+    # invalid astropy region
     with pytest.raises(TypeError, match="Unsupported region type"):
         Catalogs._create_adql_region(
             region=CirclePixelRegion(PixCoord(x=42, y=43), 4.2)
@@ -1741,60 +1760,67 @@ def test_catalogs_invalid_create_adql_region(patch_tap):
 
 
 def test_catalogs_parse_numeric_expression(patch_tap):
+    # handling between
     predicate = Catalogs._parse_numeric_expr("dec", "5..10")
     assert predicate == "dec BETWEEN 5 AND 10"
 
+    # handling inequalitie
     predicate = Catalogs._parse_numeric_expr("teff", "<1")
     assert predicate == "teff < 1"
 
+    # handling specific values
     predicate = Catalogs._parse_numeric_expr("gaiabp", "1")
     assert predicate == "gaiabp = 1.0"
 
+    # passing not numeric str
     with pytest.raises(InvalidQueryError, match="is numeric; unsupported value"):
         Catalogs._parse_numeric_expr("dec", "notnumeric")
 
 
 def test_catalogs_format_scalar_predicate(patch_tap):
+    # handling bool
     predicate = Catalogs._format_scalar_predicate(
         "var", True, numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == 'var = 1'
 
+    # handling num
     predicate = Catalogs._format_scalar_predicate(
         "e_lum", 1, numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == 'e_lum = 1'
 
+    # handling str(num)
     predicate = Catalogs._format_scalar_predicate(
         "e_lum", "1", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == 'e_lum = 1.0'
 
-    predicate = Catalogs._format_scalar_predicate(
-        "e_lum", "1", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
-    )
-    assert predicate == 'e_lum = 1.0'
-
+    # handling ! nots
     predicate = Catalogs._format_scalar_predicate(
         "e_lum", "!1", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == 'NOT (e_lum = 1.0)'
 
+    # handling wildcard *
     predicate = Catalogs._format_scalar_predicate(
         "var", "WILDCARD*", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == "var LIKE 'WILDCARD%'"
 
+    # handling wildcard * and nots
     predicate = Catalogs._format_scalar_predicate(
         "var", "!WILDCARD*", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == "NOT (var LIKE 'WILDCARD%')"
 
+    # handling wildcard %
     predicate = Catalogs._format_scalar_predicate(
         "var", "WILDCARD%", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
     assert predicate == "var LIKE 'WILDCARD%'"
 
+    # handling wildcard % and nots
     predicate = Catalogs._format_scalar_predicate(
         "var", "!WILDCARD%", numeric_cols={'epos_dist', 'e_lum', 'e_rad'}
     )
@@ -1802,24 +1828,29 @@ def test_catalogs_format_scalar_predicate(patch_tap):
 
 
 def test_catalogs_combine_predicates(patch_tap):
+    # no predicates 
     result = Catalogs._combine_predicates([], [])
     assert result == ""
 
+    # one positive predicate
     result = Catalogs._combine_predicates(["ra > 5"], [])
     assert result == "ra > 5"
 
+    # multiple positive predicate
     result = Catalogs._combine_predicates(
         ["ra > 5", "dec < 0"],
         []
     )
     assert result == "(ra > 5 OR dec < 0)"
 
+    # multiple negative predicates
     result = Catalogs._combine_predicates(
         [],
         ["ra != 5", "dec != 0"]
     )
     assert result == "ra != 5 AND dec != 0"
 
+    # multiple positive and negative predicates
     result = Catalogs._combine_predicates(
         ["ra > 5", "dec < 0"],
         ["ra != 10"]
@@ -1828,6 +1859,7 @@ def test_catalogs_combine_predicates(patch_tap):
 
 
 def test_catalogs_build_numeric_list_predicate(patch_tap):
+    # multiple positive nums
     result = Catalogs._build_numeric_list_predicate(
         "ra",
         pos_items=[1, 2, 3],
@@ -1835,6 +1867,7 @@ def test_catalogs_build_numeric_list_predicate(patch_tap):
     )
     assert result == "ra IN (1, 2, 3)"
 
+    # multiple positive bools
     result = Catalogs._build_numeric_list_predicate(
         "tessflag",
         pos_items=[True, False],
@@ -1842,6 +1875,7 @@ def test_catalogs_build_numeric_list_predicate(patch_tap):
     )
     assert result == "tessflag IN (1, 0)"
 
+    # multiple positive inequalities and ranges
     result = Catalogs._build_numeric_list_predicate(
         "dec",
         pos_items=["<5", "10..20"],
@@ -1850,13 +1884,7 @@ def test_catalogs_build_numeric_list_predicate(patch_tap):
     assert "< 5" in result
     assert "BETWEEN 10 AND 20" in result
 
-    result = Catalogs._build_numeric_list_predicate(
-        "ra",
-        pos_items=[np.int64(7)],
-        neg_items=[]
-    )
-    assert "ra IN (7)" in result
-
+    # single positive num
     result = Catalogs._build_numeric_list_predicate(
         "ra",
         pos_items=[np.int64(7)],
@@ -1866,6 +1894,7 @@ def test_catalogs_build_numeric_list_predicate(patch_tap):
 
 
 def test_catalogs_build_string_list_predicate(patch_tap):
+    # multiple positive strs
     result = Catalogs._build_string_list_predicate(
         "var",
         pos_items=["str", "str"],
@@ -1873,6 +1902,7 @@ def test_catalogs_build_string_list_predicate(patch_tap):
     )
     assert result == "var IN ('str', 'str')"
 
+    # multiple positive bools
     result = Catalogs._build_string_list_predicate(
         "var",
         pos_items=[True, False],
@@ -1880,6 +1910,7 @@ def test_catalogs_build_string_list_predicate(patch_tap):
     )
     assert result == "var IN (1, 0)"
 
+    # multiple positive strs with wildcard
     result = Catalogs._build_string_list_predicate(
         "var",
         pos_items= ["WILDCARD%", "str"],
@@ -1889,6 +1920,7 @@ def test_catalogs_build_string_list_predicate(patch_tap):
     assert "LIKE 'WILDCARD%" in result
     assert "OR" in result
 
+    # multiple positive nums
     result = Catalogs._build_string_list_predicate(
         "var",
         pos_items=[1, 0],
@@ -1898,6 +1930,7 @@ def test_catalogs_build_string_list_predicate(patch_tap):
 
 
 def test_catalogs_format_criteria_conditions(patch_tap):
+    # multiple numeric cols and singular criteria
     criteria = {"ra": 5, "dec": 10}
     result = Catalogs._format_criteria_conditions(
         CatalogCollection("tic"),
@@ -1906,6 +1939,7 @@ def test_catalogs_format_criteria_conditions(patch_tap):
     )
     assert result == ["ra = 5", "dec = 10"]
 
+    # str cols and singular criteria
     criteria = {"obj_type": "STAR"}
     result = Catalogs._format_criteria_conditions(
         CatalogCollection("tic"),
@@ -1914,6 +1948,7 @@ def test_catalogs_format_criteria_conditions(patch_tap):
     )
     assert result == ["obj_type = 'STAR'"]
 
+    # multiple cols and multiple criteria
     criteria = {"ra": [1, 2, 3], "dec": [">5", "<10"]}
     result = Catalogs._format_criteria_conditions(
         CatalogCollection("tic"),
@@ -1923,6 +1958,7 @@ def test_catalogs_format_criteria_conditions(patch_tap):
     assert any("ra IN" in r or "ra >" in r for r in result)
     assert any("dec <" in r or "dec >" in r for r in result)
 
+    # str cols and multiple criteria
     criteria = {"obj_type": ["STAR", "!GALAXY"]}
     result = Catalogs._format_criteria_conditions(
         CatalogCollection("tic"),
@@ -1932,6 +1968,7 @@ def test_catalogs_format_criteria_conditions(patch_tap):
     assert any("NOT" in r for r in result)
     assert any("STAR" in r for r in result)
 
+    # empty criteria
     criteria = {"ra": []}
     result = Catalogs._format_criteria_conditions(
         CatalogCollection("tic"),
@@ -1972,7 +2009,6 @@ def test_catalogs_invalid_tap_query(patch_tap):
 def test_catalogs_invalid_spatial_query(patch_tap):
     # force spatial query to fail
     patch_tap.search = MagicMock(side_effect=DALQueryError("spatial failed"))
-
     with pytest.raises(InvalidQueryError, match="does not support spatial queries"):
         Catalogs.query_criteria(
             collection="tic",
