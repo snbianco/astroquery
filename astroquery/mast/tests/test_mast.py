@@ -16,7 +16,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.io.votable import parse
 from astropy.utils.exceptions import AstropyDeprecationWarning
-from astropy.utils.exceptions import AstropyDeprecationWarning
+from botocore.exceptions import ClientError
 from pyvo.dal import TAPResults
 from pyvo.dal.exceptions import DALQueryError
 from pyvo.io.vosi import parse_capabilities
