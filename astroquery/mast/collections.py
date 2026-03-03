@@ -292,7 +292,7 @@ class CatalogsClass(MastQueryWithLogin):
                 adql_region = self._create_adql_region(region)
             if object_name or coordinates:  # Cone search
                 coordinates = utils.parse_input_location(coordinates=coordinates,
-                                                         object_name=object_name,
+                                                         objectname=object_name,
                                                          resolver=resolver)
                 radius = coord.Angle(radius, u.deg)  # If radius is just a number we assume degrees
                 adql_region = f'CIRCLE(\'ICRS\', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})'
