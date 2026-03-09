@@ -1472,7 +1472,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
-            objectname="M31",
+            object_name="M31",
             region="Circle ICRS 202.4656816 +47.1999842 0.04"
         )
         assert "Specify either `region` or `objectname`" in invalid_query
@@ -1481,7 +1481,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
     with pytest.raises(InvalidQueryError) as invalid_query:
         Catalogs.query_criteria(
             collection="tic",
-            objectname="M31",
+            object_name="M31",
             file_suffix=['A', 'B', '!C'],
             filters = {
                 "file_suffix":['A', 'B', '!C'],
@@ -1876,7 +1876,7 @@ def test_catalogs_build_numeric_list_predicate(patch_tap):
         pos_items=[True, False],
         neg_items=[]
     )
-    assert result == "tessflag IN (1, 0)"
+    assert result == "tessflag IN (True, False)"
 
     # multiple positive inequalities and ranges
     result = Catalogs._build_numeric_list_predicate(
