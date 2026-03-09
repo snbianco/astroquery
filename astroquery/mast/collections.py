@@ -178,7 +178,8 @@ class CatalogsClass(MastQueryWithLogin):
                                  'and will be removed in a future release. Please use `limit` instead.')
     @deprecated_renamed_argument('page', None, since='0.4.12', message='The `page` argument is deprecated '
                                  'and will be removed in a future release. Please use `offset` instead.')
-    def query_criteria(self, collection=None, *, catalog=None, coordinates=None, region=None, objectname=None,
+    @deprecated_renamed_argument('objectname', 'object_name', since='0.4.12')
+    def query_criteria(self, collection=None, *, catalog=None, coordinates=None, region=None, object_name=None,
                        radius=0.2*u.deg, resolver=None, limit=5000, offset=0, count_only=False, select_cols=None,
                        sort_by=None, sort_desc=False, filters={}, version=None, pagesize=None, page=None, **criteria):
         """
@@ -198,12 +199,12 @@ class CatalogsClass(MastQueryWithLogin):
             The region to search within. It may be specified as a STC-S POLYGON or CIRCLE string
             (e.g., 'circle(350 -80, 0.2d)'), an iterable of coordinate pairs, or as an
             `~astropy.regions.CircleSkyRegion` or `~astropy.regions.PolygonSkyRegion`.
-        objectname : str, optional
+        object_name : str, optional
             The name of the object to resolve and search around.
         radius : str or `~astropy.units.Quantity` object, optional
             The search radius around the target coordinates or object. Default 0.2 degrees.
         resolver : str, optional
-            The name resolver service to use when resolving ``objectname``.
+            The name resolver service to use when resolving ``object_name``.
         limit : int, optional
             The maximum number of results to return. Default is 5000.
         offset : int, optional
@@ -256,9 +257,9 @@ class CatalogsClass(MastQueryWithLogin):
         if coordinates and region:
             raise InvalidQueryError('Specify either `region` or `coordinates`, not both.')
 
-        # Should not specify both region and objectname
-        if objectname and region:
-            raise InvalidQueryError('Specify either `region` or `objectname`, not both.')
+        # Should not specify both region and object_name
+        if object_name and region:
+            raise InvalidQueryError('Specify either `region` or `object_name`, not both.')
 
         collection_obj, catalog = self._parse_inputs(collection, catalog)
 
@@ -279,7 +280,7 @@ class CatalogsClass(MastQueryWithLogin):
         columns = '*' if not select_cols else self._parse_select_cols(select_cols, column_metadata)
         adql = (f'SELECT TOP {limit} {columns} FROM '
                 f'{catalog.lower()} ' if not count_only else f'SELECT COUNT(*) AS count_all FROM {catalog.lower()} ')
-        if region or coordinates or objectname:
+        if region or coordinates or object_name:
             # Check if the catalog supports spatial queries
             if not collection_obj.get_catalog_metadata(catalog).supports_spatial_queries:
                 raise InvalidQueryError(f"Catalog '{catalog}' in collection '{collection_obj.name}' does not "
@@ -289,9 +290,9 @@ class CatalogsClass(MastQueryWithLogin):
             adql_region = ''
             if region:
                 adql_region = self._create_adql_region(region)
-            if objectname or coordinates:  # Cone search
+            if object_name or coordinates:  # Cone search
                 coordinates = utils.parse_input_location(coordinates=coordinates,
-                                                         objectname=objectname,
+                                                         objectname=object_name,
                                                          resolver=resolver)
                 radius = coord.Angle(radius, u.deg)  # If radius is just a number we assume degrees
                 adql_region = f'CIRCLE(\'ICRS\', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})'
@@ -457,7 +458,8 @@ class CatalogsClass(MastQueryWithLogin):
                                  'and will be removed in a future release. Please use `limit` instead.')
     @deprecated_renamed_argument('page', None, since='0.4.12', message='The `page` argument is deprecated '
                                  'and will be removed in a future release. Please use `offset` instead.')
-    def query_object(self, objectname, *, radius=0.2*u.deg, collection=None, catalog=None, resolver=None,
+    @deprecated_renamed_argument('objectname', 'object_name', since='0.4.12')
+    def query_object(self, object_name, *, radius=0.2*u.deg, collection=None, catalog=None, resolver=None,
                      limit=5000, offset=0, count_only=False, select_cols=None, sort_by=None, sort_desc=False,
                      filters={}, version=None, pagesize=None, page=None, **criteria):
         """
@@ -466,7 +468,7 @@ class CatalogsClass(MastQueryWithLogin):
 
         Parameters
         ----------
-        objectname : str, optional
+        object_name : str, optional
             The name of the object to resolve and search around.
         radius : str or `~astropy.units.Quantity` object, optional
             The search radius around the target coordinates or object. Default 0.2 degrees.
@@ -475,7 +477,7 @@ class CatalogsClass(MastQueryWithLogin):
         catalog : str, optional
             The catalog within the collection to query. If None, uses the instance's `catalog` attribute.
         resolver : str, optional
-            The name resolver service to use when resolving ``objectname``.
+            The name resolver service to use when resolving ``object_name``.
         limit : int, optional
             The maximum number of results to return. Default is 5000.
         offset : int, optional
@@ -526,7 +528,7 @@ class CatalogsClass(MastQueryWithLogin):
 
         return self.query_criteria(collection=collection,
                                    catalog=catalog,
-                                   objectname=objectname,
+                                   object_name=object_name,
                                    radius=radius,
                                    resolver=resolver,
                                    limit=limit,
@@ -927,6 +929,8 @@ class CatalogsClass(MastQueryWithLogin):
                 try:
                     float(parts[1])
                     # Format: CIRCLE ra dec radius
+                    if len(parts) < 4:
+                        raise InvalidQueryError(f"Invalid CIRCLE region string: {region}")
                     ra, dec, radius = parts[1], parts[2], parts[3]
                 except ValueError:
                     # Format: CIRCLE FRAME ra dec radius
@@ -1121,15 +1125,16 @@ class CatalogsClass(MastQueryWithLogin):
         simple_numbers = []
         complex_parts = []
         for val in pos_items:
-            if isinstance(val, bool):
-                simple_numbers.append(int(val))
-            elif isinstance(val, (int, float)):
+            if isinstance(val, (int, float)):
                 simple_numbers.append(val)
+            elif isinstance(val, bool):
+                simple_numbers.append(int(val))
             elif isinstance(val, str):
-                try:
+                parsed = self._parse_numeric_expr(col, val)
+                if 'BETWEEN' in parsed or '<' in parsed or '>' in parsed:
+                    complex_parts.append(parsed)
+                else:
                     simple_numbers.append(float(val))
-                except ValueError:
-                    complex_parts.append(self._parse_numeric_expr(col, val))
             else:
                 simple_numbers.append(val)
 

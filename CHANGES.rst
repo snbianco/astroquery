@@ -26,13 +26,28 @@ esa.euclid
 - Methods ``cone_search`` and ``cross_match_basic`` now define the  parameters ``table_name`` and ``ra_column_name`` and
   ``dec_column_name`` independently [#3496]
 
+- Method ``get_product`` now supports the input file_name as a Python list (e.g. ["file1.fits", "file2.fits"]) while 
+  still accepting the original comma separated string format. [#3541]
+
 vizier
 ^^^^^^
 
 - Methods ``get_catalog``, ``get_catalog_async`` and ``query_*`` now always return UCD1+ instead of UCD1. [#3458]
 
+mast
+^^^^
+- ``utils.mast_relative_path`` is now deprecated in favor of ``utils.get_cloud_paths``. [#3488]
+- When cloud access is enabled, ``Observations.download_file`` and ``Observations.download_products`` 
+  now check all requested products against cloud storage. As a result, setting ``cloud_only=True`` will skip 
+  any products that are not available in the cloud, rather than falling back to on-prem downloads.
+
 Service fixes and enhancements
 ------------------------------
+
+svo_fps
+^^^^^^^
+
+- Add ``get_filter_metadata`` to allow retrieval of filter metadata. [#3528]
 
 heasarc
 ^^^^^^^
@@ -83,6 +98,9 @@ mast
 
 - Added full support for the International Ultraviolet Explorer (IUE) mission in ``MastMissions``. [#3517]
 
+- Added a new ``Observations.list_cloud_datasets()`` method for querying cloud-supported MAST datasets, alongside 
+  improvements to cloud download handling. [#3488]
+
 jplspec
 ^^^^^^^
 
@@ -105,6 +123,18 @@ linelists
 
 - General tools for both CDMS/JPL moved to linelists.core [#3456]
 - Added jplspec, moved from its previous location (astroquery.jplspec to astroquery.linelists.jplspec) [#3455]
+
+ogle
+^^^^
+
+- Added ``get_query_payload`` kwarg to aid in debugging. [#3533]
+- Removed support for deprecated non-coordinate use in queries. [#3533]
+
+simbad
+~~~~~~
+
+- Add the possibility to declare more information in the HTTP User-Agent header
+  in ``SimbadClass`` [#3529]
 
 xmatch
 ^^^^^^
