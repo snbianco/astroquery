@@ -19,14 +19,13 @@ from astropy.table import Table, Row
 from astropy.utils.decorators import deprecated_renamed_argument, deprecated
 from regions import CircleSkyRegion, PolygonSkyRegion
 
-from astroquery import log
+from . import utils, conf
+from .catalog_collection import CatalogCollection
+from .core import MastQueryWithLogin
+from .. import log
 from ..utils import async_to_sync
 from ..exceptions import InputWarning, InvalidQueryError, NoResultsWarning
 from ..utils.class_or_instance import class_or_instance
-
-from . import utils
-from .catalog_collection import CatalogCollection
-from .core import MastQueryWithLogin
 
 
 __all__ = ['Catalogs', 'CatalogsClass']
@@ -38,7 +37,7 @@ class CatalogsClass(MastQueryWithLogin):
     Class for discovering and querying MAST catalog collections.
     """
 
-    TAP_BASE_URL = 'https://masttest.stsci.edu/vo-tap/api/v0.1/'
+    TAP_BASE_URL = conf.server + '/vo-tap/api/v0.1/'
 
     def __init__(self, collection='hsc', catalog=None):
 
@@ -113,18 +112,9 @@ class CatalogsClass(MastQueryWithLogin):
         if getattr(self, "_available_collections", None):
             return Table([self._available_collections], names=('collection_name',))
 
-        # Otherwise, fetch from the TAP service
+        # Otherwise, fetch from TAP service discovery, including grouped collections.
         log.debug("Fetching available collections from MAST TAP service.")
-        url = self.TAP_BASE_URL + "openapi.json"
-        response = utils._simple_request(url)
-        response.raise_for_status()
-        data = response.json()
-
-        # Extract collection enumeration
-        collection_enum = data["components"]["schemas"]["CatalogName"]["enum"]
-
-        # Build an Astropy Table to hold the results
-        collection_table = Table([collection_enum], names=('collection_name',))
+        collection_table = CatalogCollection.discover_collections()[['collection_name']]
         return collection_table
 
     @class_or_instance
@@ -845,7 +835,7 @@ class CatalogsClass(MastQueryWithLogin):
         if not valid_selected:
             raise InvalidQueryError("No valid columns specified in `select_cols`.")
         return ', '.join(valid_selected)
-    
+
     def _parse_legacy_pagination(self, limit, offset, pagesize, page):
         """
         Parse legacy pagesize and page parameters to determine limit and offset.

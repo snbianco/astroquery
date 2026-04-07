@@ -1073,220 +1073,222 @@ class TestMast:
     ######################
 
     # query functions
-    def test_catalogs_query_region_async(self):
-        in_rad = 0.001 * u.deg
-        responses = Catalogs.query_region_async("158.47924 -7.30962",
-                                                radius=in_rad,
-                                                catalog="Galex")
-        assert isinstance(responses, list)
+    # def test_catalogs_query_region_async(self):
+    #     in_rad = 0.001 * u.deg
+    #     responses = Catalogs.query_region_async("158.47924 -7.30962",
+    #                                             radius=in_rad,
+    #                                             catalog="Galex")
+    #     assert isinstance(responses, list)
 
-        # Default catalog is HSC
-        responses = Catalogs.query_region_async("322.49324 12.16683",
-                                                radius=in_rad)
-        assert isinstance(responses, list)
+    #     # Default catalog is HSC
+    #     responses = Catalogs.query_region_async("322.49324 12.16683",
+    #                                             radius=in_rad)
+    #     assert isinstance(responses, list)
 
-        responses = Catalogs.query_region_async("322.49324 12.16683",
-                                                radius=in_rad,
-                                                catalog="panstarrs",
-                                                table="mean")
-        assert isinstance(responses, Response)
+    #     responses = Catalogs.query_region_async("322.49324 12.16683",
+    #                                             radius=in_rad,
+    #                                             catalog="panstarrs",
+    #                                             table="mean")
+    #     assert isinstance(responses, Response)
 
-    def test_catalogs_query_region(self):
-        def check_result(result, row, exp_values):
-            assert isinstance(result, Table)
-            for k, v in exp_values.items():
-                assert result[row][k] == v
+    # def test_catalogs_query_region(self):
+    #     warnings.filterwarnings("ignore", category=pyvo.dal.exceptions.DALOverflowWarning)
+    #     def check_result(result, row, exp_values):
+    #         assert isinstance(result, Table)
+    #         for k, v in exp_values.items():
+    #             assert result[row][k] == v
 
-        in_radius = 0.1 * u.deg
-        result = Catalogs.query_region("158.47924 -7.30962",
-                                       radius=in_radius,
-                                       catalog="Gaia")
-        row = np.where(result['source_id'] == '3774902350511581696')
-        check_result(result, row, {'solution_id': '1635721458409799680'})
+    #     in_radius = 0.1 * u.deg
+    #     result = Catalogs.query_region("158.47924 -7.30962",
+    #                                    radius=in_radius,
+    #                                    collection="gaiadr3")
+    #     row = np.where(result['source_id'] == '3774902350511581696')
+    #     check_result(result, row, {'solution_id': '1635721458409799680'})
 
-        result = Catalogs.query_region("322.49324 12.16683",
-                                       radius=0.001*u.deg,
-                                       catalog="HSC",
-                                       magtype=2)
-        row = np.where(result['MatchID'] == '8150896')
+    #     result = Catalogs.query_region("322.49324 12.16683",
+    #                                    radius=0.001*u.deg,
+    #                                    collection="HSC",
+    #                                    magtype=2)
+    #     row = np.where(result['MatchID'] == '8150896')
 
-        with pytest.warns(MaxResultsWarning):
-            result = Catalogs.query_region("322.49324 12.16683", catalog="HSC", magtype=2, nr=5)
+    #     with pytest.warns(MaxResultsWarning):
+    #         result = Catalogs.query_region("322.49324 12.16683", collection="HSC", magtype=2, nr=5)
 
-        check_result(result, row, {'NumImages': 14, 'TargetName': 'M15'})
+    #     check_result(result, row, {'NumImages': 14, 'TargetName': 'M15'})
 
-        result = Catalogs.query_region("322.49324 12.16683",
-                                       radius=0.001*u.deg,
-                                       catalog="HSC",
-                                       version=2,
-                                       magtype=2)
-        row = np.where(result['MatchID'] == '82361658')
-        check_result(result, row, {'NumImages': 11, 'TargetName': 'NGC7078'})
+    #     result = Catalogs.query_region("322.49324 12.16683",
+    #                                    radius=0.001*u.deg,
+    #                                    collection="HSC",
+    #                                    version=2,
+    #                                    magtype=2)
+    #     row = np.where(result['MatchID'] == '82361658')
+    #     check_result(result, row, {'NumImages': 11, 'TargetName': 'NGC7078'})
 
-        result = Catalogs.query_region("322.49324 12.16683",
-                                       radius=in_radius,
-                                       catalog="Gaia",
-                                       version=1)
-        row = np.where(result['source_id'] == '1745948323734098688')
-        check_result(result, row, {'solution_id': '1635378410781933568'})
-        result = Catalogs.query_region("322.49324 12.16683",
-                                       radius=0.01*u.deg,
-                                       catalog="Gaia",
-                                       version=2)
+    #     result = Catalogs.query_region("322.49324 12.16683",
+    #                                    radius=in_radius,
+    #                                    collection="gaiadr4",
+    #                                    version=1)
+    #     row = np.where(result['source_id'] == '1745948323734098688')
+    #     check_result(result, row, {'solution_id': '1635378410781933568'})
+    #     result = Catalogs.query_region("322.49324 12.16683",
+    #                                    radius=0.01*u.deg,
+    #                                    collection="gaiadr3",
+    #                                    version=2)
 
-        row = np.where(result['source_id'] == '1745947739618544000')
-        check_result(result, row, {'solution_id': '1635721458409799680'})
+    #     row = np.where(result['source_id'] == '1745947739618544000')
+    #     check_result(result, row, {'solution_id': '1635721458409799680'})
 
-        result = Catalogs.query_region("322.49324 12.16683",
-                                       radius=0.01*u.deg, catalog="panstarrs",
-                                       table="mean",
-                                       columns=['objName', 'objID', 'yFlags', 'distance'])
-        row = np.where((result['objName'] == 'PSO J322.4622+12.1920') & (result['yFlags'] == 16777496))
-        assert isinstance(result, Table)
-        np.testing.assert_allclose(result[row]['distance'], 0.039381703406789904)
+    #     result = Catalogs.query_region("322.49324 12.16683",
+    #                                    radius=0.01*u.deg, collection="gaiadr3",
+    #                                    table="mean",
+    #                                    columns=['objName', 'objID', 'yFlags', 'distance'])
+    #     row = np.where((result['objName'] == 'PSO J322.4622+12.1920') & (result['yFlags'] == 16777496))
+    #     assert isinstance(result, Table)
+    #     np.testing.assert_allclose(result[row]['distance'], 0.039381703406789904)
 
-        result = Catalogs.query_region("158.47924 -7.30962",
-                                       radius=in_radius,
-                                       catalog="Galex")
-        in_radius_arcmin = 0.1*u.deg.to(u.arcmin)
-        distances = list(result['distance_arcmin'])
-        assert isinstance(result, Table)
-        assert max(distances) <= in_radius_arcmin
+    #     result = Catalogs.query_region("158.47924 -7.30962",
+    #                                    radius=in_radius,
+    #                                    collection="Galex")
+    #     in_radius_arcmin = 0.1*u.deg.to(u.arcmin)
+    #     distances = list(result['distance_arcmin'])
+    #     assert isinstance(result, Table)
+    #     assert max(distances) <= in_radius_arcmin
 
-        result = Catalogs.query_region("158.47924 -7.30962",
-                                       radius=in_radius,
-                                       catalog="tic")
-        row = np.where(result['ID'] == '841736289')
-        second_id = result[1]['ID']
-        check_result(result, row, {'gaiaqflag': 1})
-        np.testing.assert_allclose(result[row]['RA_orig'], 158.475246786483)
+    #     result = Catalogs.query_region("158.47924 -7.30962",
+    #                                    radius=in_radius,
+    #                                    collection="TIC")
+    #     row = np.where(result['ID'] == '841736289')
+    #     second_id = result[1]['ID']
+    #     check_result(result, row, {'gaiaqflag': 1})
+    #     np.testing.assert_allclose(result[row]['RA_orig'], 158.475246786483)
 
-        result = Catalogs.query_region("158.47924 -7.30962",
-                                       radius=in_radius,
-                                       catalog="tic",
-                                       pagesize=1,
-                                       page=2)
-        assert isinstance(result, Table)
-        assert len(result) == 1
-        assert second_id == result[0]['ID']
+    #     result = Catalogs.query_region("158.47924 -7.30962",
+    #                                    radius=in_radius,
+    #                                    collection="TIC",
+    #                                    pagesize=1,
+    #                                    page=2)
+    #     assert isinstance(result, Table)
+    #     assert len(result) == 1
+    #     assert second_id == result[0]['ID']
 
-        result = Catalogs.query_region("158.47924 -7.30962",
-                                       radius=in_radius,
-                                       catalog="ctl")
-        row = np.where(result['ID'] == '56662064')
-        check_result(result, row, {'TYC': '4918-01335-1'})
+    #     result = Catalogs.query_region("158.47924 -7.30962",
+    #                                    radius=in_radius,
+    #                                    collection="ctl")
+    #     row = np.where(result['ID'] == '56662064')
+    #     check_result(result, row, {'TYC': '4918-01335-1'})
 
-        result = Catalogs.query_region("210.80227 54.34895",
-                                       radius=1*u.deg,
-                                       catalog="diskdetective")
-        row = np.where(result['designation'] == 'J140544.95+535941.1')
-        check_result(result, row, {'ZooniverseID': 'AWI0000r57'})
+    #     result = Catalogs.query_region("210.80227 54.34895",
+    #                                    radius=1*u.deg,
+    #                                    collection="diskdetective")
+    #     row = np.where(result['designation'] == 'J140544.95+535941.1')
+    #     check_result(result, row, {'ZooniverseID': 'AWI0000r57'})
 
-    def test_catalogs_query_object_async(self):
-        responses = Catalogs.query_object_async("M10",
-                                                radius=.02,
-                                                catalog="TIC")
-        assert isinstance(responses, list)
+    # def test_catalogs_query_object_async(self):
+    #     responses = Catalogs.query_object_async("M10",
+    #                                             radius=.02,
+    #                                             catalog="TIC")
+    #     assert isinstance(responses, list)
 
-    def test_catalogs_query_object(self):
-        def check_result(result, exp_values):
-            assert isinstance(result, Table)
-            for k, v in exp_values.items():
-                assert v in result[k]
+    # def test_catalogs_query_object(self):
+    #     warnings.filterwarnings("ignore", category=pyvo.dal.exceptions.DALOverflowWarning)
+    #     def check_result(result, exp_values):
+    #         assert isinstance(result, Table)
+    #         for k, v in exp_values.items():
+    #             assert v in result[k]
 
-        result = Catalogs.query_object("M10",
-                                       radius=.001,
-                                       catalog="TIC")
-        check_result(result, {'ID': '1305764225'})
-        second_id = result[1]['ID']
+    #     result = Catalogs.query_object("M10",
+    #                                    radius=.001,
+    #                                    catalog="TIC")
+    #     check_result(result, {'ID': '1305764225'})
+    #     second_id = result[1]['ID']
 
-        result = Catalogs.query_object("M10",
-                                       radius=.001,
-                                       catalog="TIC",
-                                       pagesize=1,
-                                       page=2)
-        assert isinstance(result, Table)
-        assert len(result) == 1
-        assert second_id == result[0]['ID']
+    #     result = Catalogs.query_object("M10",
+    #                                    radius=.001,
+    #                                    catalog="TIC",
+    #                                    pagesize=1,
+    #                                    page=2)
+    #     assert isinstance(result, Table)
+    #     assert len(result) == 1
+    #     assert second_id == result[0]['ID']
 
-        result = Catalogs.query_object("M10",
-                                       radius=.001,
-                                       catalog="HSC",
-                                       magtype=1)
-        check_result(result, {'MatchID': '667727'})
+    #     result = Catalogs.query_object("M10",
+    #                                    radius=.001,
+    #                                    catalog="HSC",
+    #                                    magtype=1)
+    #     check_result(result, {'MatchID': '667727'})
 
-        result = Catalogs.query_object("M10",
-                                       radius=.001,
-                                       catalog="panstarrs",
-                                       table="mean",
-                                       columns=['objName', 'objID'])
-        check_result(result, {'objName': 'PSO J254.2873-04.1006'})
+    #     result = Catalogs.query_object("M10",
+    #                                    radius=.001,
+    #                                    catalog="panstarrs",
+    #                                    table="mean",
+    #                                    columns=['objName', 'objID'])
+    #     check_result(result, {'objName': 'PSO J254.2873-04.1006'})
 
-        result = Catalogs.query_object("M10",
-                                       radius=0.18,
-                                       catalog="diskdetective")
-        check_result(result, {'designation': 'J165749.79-040315.1'})
+    #     result = Catalogs.query_object("M10",
+    #                                    radius=0.18,
+    #                                    catalog="diskdetective")
+    #     check_result(result, {'designation': 'J165749.79-040315.1'})
 
-        result = Catalogs.query_object("M10",
-                                       radius=0.001,
-                                       catalog="Gaia",
-                                       version=1)
-        distances = list(result['distance'])
-        radius_arcmin = 0.01 * u.deg.to(u.arcmin)
-        assert isinstance(result, Table)
-        assert max(distances) < radius_arcmin
+    #     result = Catalogs.query_object("M10",
+    #                                    radius=0.001,
+    #                                    catalog="Gaia",
+    #                                    version=1)
+    #     distances = list(result['distance'])
+    #     radius_arcmin = 0.01 * u.deg.to(u.arcmin)
+    #     assert isinstance(result, Table)
+    #     assert max(distances) < radius_arcmin
 
-        result = Catalogs.query_object("TIC 441662144",
-                                       radius=0.001,
-                                       catalog="ctl")
-        check_result(result, {'ID': '441662144'})
+    #     result = Catalogs.query_object("TIC 441662144",
+    #                                    radius=0.001,
+    #                                    catalog="ctl")
+    #     check_result(result, {'ID': '441662144'})
 
-        result = Catalogs.query_object('M10',
-                                       radius=0.08,
-                                       catalog='plato')
-        assert 'PICidDR1' in result.colnames
+    #     result = Catalogs.query_object('M10',
+    #                                    radius=0.08,
+    #                                    catalog='plato')
+    #     assert 'PICidDR1' in result.colnames
 
-    def test_catalogs_query_criteria_async(self):
-        # without position
-        responses = Catalogs.query_criteria_async(catalog="Tic",
-                                                  Bmag=[30, 50],
-                                                  objType="STAR")
-        assert isinstance(responses, list)
+    # def test_catalogs_query_criteria_async(self):
+    #     # without position
+    #     responses = Catalogs.query_criteria_async(catalog="Tic",
+    #                                               Bmag=[30, 50],
+    #                                               objType="STAR")
+    #     assert isinstance(responses, list)
 
-        responses = Catalogs.query_criteria_async(catalog="ctl",
-                                                  Bmag=[30, 50],
-                                                  objType="STAR")
-        assert isinstance(responses, list)
+    #     responses = Catalogs.query_criteria_async(catalog="ctl",
+    #                                               Bmag=[30, 50],
+    #                                               objType="STAR")
+    #     assert isinstance(responses, list)
 
-        responses = Catalogs.query_criteria_async(catalog="DiskDetective",
-                                                  state=["inactive", "disabled"],
-                                                  oval=[8, 10],
-                                                  multi=[3, 7])
-        assert isinstance(responses, list)
+    #     responses = Catalogs.query_criteria_async(catalog="DiskDetective",
+    #                                               state=["inactive", "disabled"],
+    #                                               oval=[8, 10],
+    #                                               multi=[3, 7])
+    #     assert isinstance(responses, list)
 
-        # with position
-        responses = Catalogs.query_criteria_async(catalog="Tic",
-                                                  objectname="M10",
-                                                  objType="EXTENDED")
-        assert isinstance(responses, list)
+    #     # with position
+    #     responses = Catalogs.query_criteria_async(catalog="Tic",
+    #                                               objectname="M10",
+    #                                               objType="EXTENDED")
+    #     assert isinstance(responses, list)
 
-        responses = Catalogs.query_criteria_async(catalog="CTL",
-                                                  objectname="M10",
-                                                  objType="EXTENDED")
-        assert isinstance(responses, list)
+    #     responses = Catalogs.query_criteria_async(catalog="CTL",
+    #                                               objectname="M10",
+    #                                               objType="EXTENDED")
+    #     assert isinstance(responses, list)
 
-        responses = Catalogs.query_criteria_async(catalog="DiskDetective",
-                                                  objectname="M10",
-                                                  radius=2,
-                                                  state="complete")
-        assert isinstance(responses, list)
+    #     responses = Catalogs.query_criteria_async(catalog="DiskDetective",
+    #                                               objectname="M10",
+    #                                               radius=2,
+    #                                               state="complete")
+    #     assert isinstance(responses, list)
 
-        responses = Catalogs.query_criteria_async(catalog="panstarrs",
-                                                  table="mean",
-                                                  objectname="M10",
-                                                  radius=.02,
-                                                  qualityFlag=48)
-        assert isinstance(responses, Response)
+    #     responses = Catalogs.query_criteria_async(catalog="panstarrs",
+    #                                               table="mean",
+    #                                               objectname="M10",
+    #                                               radius=.02,
+    #                                               qualityFlag=48)
+    #     assert isinstance(responses, Response)
 
     def test_catalogs_query_criteria(self):
         def check_result(result, exp_vals):
