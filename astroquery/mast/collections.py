@@ -51,7 +51,7 @@ class CatalogsClass(MastQueryWithLogin):
         # Initialization of this class should not trigger network requests
         # These properties are first set without validation
         self._collection = CatalogCollection(collection)
-        self._catalog = catalog if catalog else self._collection.default_catalog
+        self.catalog = catalog if catalog else self._collection.default_catalog
 
     @property
     def collection(self):
@@ -255,19 +255,26 @@ class CatalogsClass(MastQueryWithLogin):
 
         # Check for conflicts between named parameters and filters dict
         if criteria and filters:
-            overlap = set(criteria) & set(filters)
+            overlap = set(k.lower() for k in criteria) & set(k.lower() for k in filters)
             if overlap:
                 raise InvalidQueryError(f"Criteria specified both as keyword arguments and in 'filters' for columns: "
-                                        f"{', '.join(overlap)}")
+                                        f"{', '.join(sorted(overlap))}")
 
         # Merge criteria from named parameters and filters dict
-        all_criteria = {}
-        all_criteria.update(criteria)
-        all_criteria.update(filters)
+        search_criteria = {}
+        search_criteria.update(criteria)
+        search_criteria.update(filters)
 
-        collection_obj._verify_criteria(catalog, **all_criteria)
+        # Validate sort_by columns together with criteria keys so all column checks go through one path
+        validation_criteria = dict(search_criteria)
+        if sort_by:
+            sort_by = [sort_by] if isinstance(sort_by, str) else list(sort_by)
+            validation_criteria.update({col: True for col in sort_by})
+
+        collection_obj._verify_criteria(catalog, **validation_criteria)
         column_metadata = collection_obj.get_catalog_metadata(catalog).column_metadata
         columns = '*' if not select_cols else self._parse_select_cols(select_cols, column_metadata)
+
         adql = (f'SELECT TOP {limit} {columns} FROM '
                 f'{catalog.lower()} ' if not count_only else f'SELECT COUNT(*) AS count_all FROM {catalog.lower()} ')
         if region or coordinates or object_name:
@@ -299,8 +306,8 @@ class CatalogsClass(MastQueryWithLogin):
             adql += (f'WHERE CONTAINS(POINT(\'ICRS\', {ra_col}, {dec_col}), {adql_region}) = 1 ')
 
         # Add additional constraints
-        if all_criteria:
-            conditions = self._format_criteria_conditions(collection_obj, catalog, all_criteria)
+        if search_criteria:
+            conditions = self._format_criteria_conditions(collection_obj, catalog, search_criteria)
             if 'WHERE' in adql:
                 adql += 'AND ' + ' AND '.join(conditions)
             else:
@@ -309,8 +316,6 @@ class CatalogsClass(MastQueryWithLogin):
         # Add sorting if specified
         if sort_by:
             # Add ORDER BY clause
-            if isinstance(sort_by, str):
-                sort_by = [sort_by]
             if isinstance(sort_desc, bool):
                 sort_desc = [sort_desc]
 
@@ -321,8 +326,6 @@ class CatalogsClass(MastQueryWithLogin):
 
             sort_adql = ''
             for col in sort_by:
-                if col not in collection_obj.get_catalog_metadata(catalog).column_metadata['column_name'].tolist():
-                    raise InvalidQueryError(f"Sort column '{col}' not found in catalog '{catalog}'.")
                 sort_adql += f"{col} " + ("DESC" if sort_desc[sort_by.index(col)] else "ASC") + ", "
 
             adql += f' ORDER BY {sort_adql.rstrip(", ")}'
@@ -556,7 +559,8 @@ class CatalogsClass(MastQueryWithLogin):
         """
         self._current_connection = self._portal_api_connection
 
-        match = match["MatchID"] if isinstance(match, Row) else match
+        if isinstance(match, Row):
+            match = match['MatchID'] if 'MatchID' in match.colnames else match['matchid']
         match = str(match)  # np.int64 gives json serializer problems, so stringify right here
 
         if version == 2:
@@ -1114,6 +1118,7 @@ class CatalogsClass(MastQueryWithLogin):
         # Positives: split into simple numbers and complex expressions
         simple_numbers = []
         complex_parts = []
+        print(pos_items)
         for val in pos_items:
             if isinstance(val, (int, float)):
                 simple_numbers.append(val)
