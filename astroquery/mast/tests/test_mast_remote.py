@@ -1076,7 +1076,7 @@ class TestMast:
         # Default collection should be HSC
         c = Catalogs()
         assert c.collection.name == "hsc"
-        assert c.catalog == "dbo.summagaper2catview"
+        assert c.catalog == "dbo.SumMagAper2CatView"
 
         # Initialize with a different collection
         c = Catalogs(collection="gaiadr3")

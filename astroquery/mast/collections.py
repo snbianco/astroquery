@@ -39,7 +39,7 @@ class CatalogsClass(MastQueryWithLogin):
 
     TAP_BASE_URL = conf.server + '/vo-tap/api/v0.1/'
 
-    def __init__(self, collection='hsc', catalog=None):
+    def __init__(self, collection=None, catalog=None):
 
         super().__init__()
 
@@ -48,10 +48,18 @@ class CatalogsClass(MastQueryWithLogin):
         self._renamed_collections = {'panstarrs': 'ps1_dr2', 'gaia': 'gaiadr3'}
         self._collections_cache = dict()
 
-        # Initialization of this class should not trigger network requests
-        # These properties are first set without validation
-        self._collection = CatalogCollection(collection)
-        self.catalog = catalog if catalog else self._collection.default_catalog
+        # Default initialization of this class should not trigger network requests
+        # Only set collection and catalog if explicitly provided, otherwise defer to property setters
+        # which will handle defaults without network calls
+        if not collection:
+            self._collection = CatalogCollection('hsc')  # default collection
+        else:
+            self.collection = collection  # Use the setter for validation if collection is provided
+
+        if not catalog:
+            self._catalog = self._collection.default_catalog
+        else:
+            self.catalog = catalog  # Use the setter for validation if catalog is provided
 
     @property
     def collection(self):
