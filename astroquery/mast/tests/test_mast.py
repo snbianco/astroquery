@@ -1873,7 +1873,7 @@ def test_catalogs_build_numeric_list_predicate(patch_tap):
         pos_items=[True, False],
         neg_items=[]
     )
-    assert result == "tessflag IN (True, False)"
+    assert result == "tessflag IN (1, 0)"
 
     # multiple positive inequalities and ranges
     result = Catalogs._build_numeric_list_predicate(
