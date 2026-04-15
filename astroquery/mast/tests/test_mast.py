@@ -1496,7 +1496,7 @@ def test_catalogs_invalid_query_criteria(patch_tap):
         )
 
     # invalid sort col
-    with pytest.raises(InvalidQueryError, match="Sort column 'fake' not found in catalog"):
+    with pytest.raises(InvalidQueryError, match="Filter 'fake' is not recognized"):
         Catalogs.query_criteria(
             collection="tic",
             coordinates=regionCoords,
@@ -1550,6 +1550,34 @@ def test_catalogs_query_object(patch_tap):
     assert "CONTAINS" in query
     assert "POINT" in query
     assert str(radius) in query
+
+
+def test_catalogs_init_with_catalog(patch_tap):
+    catalog = Catalogs(
+        collection="tic",
+        catalog="tap_schema.schemas"
+    )
+    assert catalog.catalog == "tap_schema.schemas"
+
+
+def test_catalogs_get_collections_cached(patch_tap):
+    catalog = Catalogs("tic")
+    collections = catalog.get_collections()
+
+    assert isinstance(collections, Table)
+    assert len(collections) > 0
+    assert "collection_name" in collections.colnames
+
+
+def test_catalogs_supports_spatial_queries(patch_tap):
+    catalog = Catalogs()
+    result = catalog.supports_spatial_queries(
+        collection="tic",
+        catalog="tap_schema.schemas"
+    )
+
+    assert isinstance(result, bool)
+    assert result
 
 
 def test_catalogs_query_hsc_matchid_async(patch_post):
@@ -2113,6 +2141,15 @@ def test_catalog_collection_invalid_run_tap_query(patch_tap):
     with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
         adql_str = "invalid"
         cc.run_tap_query(adql_str)
+
+
+def test_catalog_collection_grouped_fetch_catalogs(patch_tap):
+    name = "roman_catalogs"
+    cc = CatalogCollection(name)
+    _ = cc._fetch_catalogs()
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    assert f"WHERE table_name LIKE '{name}" in query
 
 
 def test_catalog_collection_verify_catalog(patch_tap):
