@@ -22,6 +22,7 @@ from astropy.utils.exceptions import AstropyDeprecationWarning
 from pyvo.dal import TAPResults
 from pyvo.dal.exceptions import DALQueryError, DALServiceError
 from pyvo.io.vosi import parse_capabilities
+from regions import CirclePixelRegion, CircleSkyRegion, PixCoord, PolygonSkyRegion
 from requests import HTTPError, Response
 
 from astroquery.exceptions import (AuthenticationWarning, BlankResponseWarning, InputWarning, InvalidQueryError,
