@@ -6,7 +6,6 @@ import json
 import os
 import re
 import warnings
-from datetime import datetime
 from pathlib import Path
 from shutil import copyfile
 from types import SimpleNamespace
@@ -15,15 +14,15 @@ from unittest.mock import MagicMock, patch
 import astropy.units as u
 import numpy as np
 import pytest
-from astropy.coordinates import Angle, SkyCoord
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.io.votable import from_table, parse
 from astropy.table import Table, unique
-from astropy.time import Time
 from astropy.utils.exceptions import AstropyDeprecationWarning
 from pyvo.dal import TAPResults
 from pyvo.dal.exceptions import DALQueryError, DALServiceError
 from pyvo.io.vosi import parse_capabilities
+from regions import CirclePixelRegion, CircleSkyRegion, PixCoord, PolygonSkyRegion
 from requests import HTTPError, Response
 
 from astroquery.exceptions import (AuthenticationWarning, BlankResponseWarning, InputWarning, InvalidQueryError,
@@ -36,7 +35,6 @@ from astroquery.mast.cutouts import _parse_cutout_size
 from astroquery.utils.mocks import MockResponse
 from astroquery.exceptions import (LargeQueryWarning)
 
-from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
 
 try:
     # Optional dependency import for cloud access functionality
