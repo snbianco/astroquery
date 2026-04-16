@@ -5,30 +5,31 @@ MAST Collections
 
 This module contains methods for discovering and querying MAST catalog collections.
 """
+
 import difflib
-import warnings
-import re
 import os
+import re
 import time
+import warnings
 from collections.abc import Iterable
 
-import astropy.units as u
 import astropy.coordinates as coord
+import astropy.units as u
 import requests
-from astropy.table import Table, Row
-from astropy.utils.decorators import deprecated_renamed_argument, deprecated
+from astropy.table import Row, Table
+from astropy.time import Time
+from astropy.utils.decorators import deprecated, deprecated_renamed_argument
 from regions import CircleSkyRegion, PolygonSkyRegion
 
-from . import utils, conf
+from .. import log
+from ..exceptions import InputWarning, InvalidQueryError, NoResultsWarning
+from ..utils import async_to_sync
+from ..utils.class_or_instance import class_or_instance
+from . import conf, utils
 from .catalog_collection import CatalogCollection
 from .core import MastQueryWithLogin
-from .. import log
-from ..utils import async_to_sync
-from ..exceptions import InputWarning, InvalidQueryError, NoResultsWarning
-from ..utils.class_or_instance import class_or_instance
 
-
-__all__ = ['Catalogs', 'CatalogsClass']
+__all__ = ["Catalogs", "CatalogsClass"]
 
 
 @async_to_sync
@@ -37,22 +38,22 @@ class CatalogsClass(MastQueryWithLogin):
     Class for discovering and querying MAST catalog collections.
     """
 
-    TAP_BASE_URL = conf.server + '/vo-tap/api/v0.1/'
+    TAP_BASE_URL = conf.server + "/vo-tap/api/v0.1/"
 
     def __init__(self, collection=None, catalog=None):
 
         super().__init__()
 
         self._available_collections = None  # Lazy load on first request
-        self._no_longer_supported_collections = ['ctl', 'diskdetective', 'galex', 'plato']
-        self._renamed_collections = {'panstarrs': 'ps1_dr2', 'gaia': 'gaiadr3'}
+        self._no_longer_supported_collections = ["ctl", "diskdetective", "galex", "plato"]
+        self._renamed_collections = {"panstarrs": "ps1_dr2", "gaia": "gaiadr3"}
         self._collections_cache = dict()
 
         # Default initialization of this class should not trigger network requests
         # Only set collection and catalog if explicitly provided, otherwise defer to property setters
         # which will handle defaults without network calls
         if not collection:
-            self._collection = CatalogCollection('hsc')  # default collection
+            self._collection = CatalogCollection("hsc")  # default collection
         else:
             self.collection = collection  # Use the setter for validation if collection is provided
 
@@ -78,7 +79,7 @@ class CatalogsClass(MastQueryWithLogin):
         self._collection = collection_obj
 
         # Only change catalog if not set yet or invalid for this collection
-        if not hasattr(self, '_catalog') or self._catalog not in collection_obj.catalog_names:
+        if not hasattr(self, "_catalog") or self._catalog not in collection_obj.catalog_names:
             self._catalog = collection_obj.default_catalog
 
     @property
@@ -103,7 +104,7 @@ class CatalogsClass(MastQueryWithLogin):
         """
         if self._available_collections is None:
             table = self.get_collections()
-            self._available_collections = table['collection_name'].tolist()
+            self._available_collections = table["collection_name"].tolist()
         return self._available_collections
 
     @class_or_instance
@@ -118,11 +119,11 @@ class CatalogsClass(MastQueryWithLogin):
         """
         # If already cached, use it directly
         if getattr(self, "_available_collections", None):
-            return Table([self._available_collections], names=('collection_name',))
+            return Table([self._available_collections], names=("collection_name",))
 
         # Otherwise, fetch from TAP service discovery, including grouped collections.
         log.debug("Fetching available collections from MAST TAP service.")
-        collection_table = CatalogCollection.discover_collections()[['collection_name']]
+        collection_table = CatalogCollection.discover_collections()[["collection_name"]]
         return collection_table
 
     @class_or_instance
@@ -170,16 +171,50 @@ class CatalogsClass(MastQueryWithLogin):
         return collection_obj.get_catalog_metadata(catalog).supports_spatial_queries
 
     @class_or_instance
-    @deprecated_renamed_argument('version', None, since='0.4.12', message='The `version` argument is deprecated and '
-                                 'will be removed in a future release. Please use `collection` and `catalog` instead.')
-    @deprecated_renamed_argument('pagesize', None, since='0.4.12', message='The `pagesize` argument is deprecated '
-                                 'and will be removed in a future release. Please use `limit` instead.')
-    @deprecated_renamed_argument('page', None, since='0.4.12', message='The `page` argument is deprecated '
-                                 'and will be removed in a future release. Please use `offset` instead.')
-    @deprecated_renamed_argument('objectname', 'object_name', since='0.4.12')
-    def query_criteria(self, collection=None, *, catalog=None, coordinates=None, region=None, object_name=None,
-                       radius=0.2*u.deg, resolver=None, limit=5000, offset=0, count_only=False, select_cols=None,
-                       sort_by=None, sort_desc=False, filters={}, version=None, pagesize=None, page=None, **criteria):
+    @deprecated_renamed_argument(
+        "version",
+        None,
+        since="0.4.12",
+        message="The `version` argument is deprecated and "
+        "will be removed in a future release. Please use `collection` and `catalog` instead.",
+    )
+    @deprecated_renamed_argument(
+        "pagesize",
+        None,
+        since="0.4.12",
+        message="The `pagesize` argument is deprecated "
+        "and will be removed in a future release. Please use `limit` instead.",
+    )
+    @deprecated_renamed_argument(
+        "page",
+        None,
+        since="0.4.12",
+        message="The `page` argument is deprecated "
+        "and will be removed in a future release. Please use `offset` instead.",
+    )
+    @deprecated_renamed_argument("objectname", "object_name", since="0.4.12")
+    def query_criteria(
+        self,
+        collection=None,
+        *,
+        catalog=None,
+        coordinates=None,
+        region=None,
+        object_name=None,
+        radius=0.2 * u.deg,
+        resolver=None,
+        limit=5000,
+        offset=0,
+        count_only=False,
+        select_cols=None,
+        sort_by=None,
+        sort_desc=False,
+        filters={},
+        version=None,
+        pagesize=None,
+        page=None,
+        **criteria,
+    ):
         """
         Query a MAST catalog from a given collection using criteria filters. To return columns for a given
         collection and catalog, use `~astroquery.mast.collections.get_catalog_metadata`.
@@ -253,11 +288,11 @@ class CatalogsClass(MastQueryWithLogin):
 
         # Should not specify both region and coordinates
         if coordinates and region:
-            raise InvalidQueryError('Specify either `region` or `coordinates`, not both.')
+            raise InvalidQueryError("Specify either `region` or `coordinates`, not both.")
 
         # Should not specify both region and object_name
         if object_name and region:
-            raise InvalidQueryError('Specify either `region` or `object_name`, not both.')
+            raise InvalidQueryError("Specify either `region` or `object_name`, not both.")
 
         collection_obj, catalog = self._parse_inputs(collection, catalog)
 
@@ -265,8 +300,10 @@ class CatalogsClass(MastQueryWithLogin):
         if criteria and filters:
             overlap = set(k.lower() for k in criteria) & set(k.lower() for k in filters)
             if overlap:
-                raise InvalidQueryError(f"Criteria specified both as keyword arguments and in 'filters' for columns: "
-                                        f"{', '.join(sorted(overlap))}")
+                raise InvalidQueryError(
+                    f"Criteria specified both as keyword arguments and in 'filters' for columns: "
+                    f"{', '.join(sorted(overlap))}"
+                )
 
         # Merge criteria from named parameters and filters dict
         search_criteria = {}
@@ -281,45 +318,51 @@ class CatalogsClass(MastQueryWithLogin):
 
         collection_obj._verify_criteria(catalog, **validation_criteria)
         column_metadata = collection_obj.get_catalog_metadata(catalog).column_metadata
-        columns = '*' if not select_cols else self._parse_select_cols(select_cols, column_metadata)
+        columns = "*" if not select_cols else self._parse_select_cols(select_cols, column_metadata)
 
-        adql = (f'SELECT TOP {limit} {columns} FROM '
-                f'{catalog.lower()} ' if not count_only else f'SELECT COUNT(*) AS count_all FROM {catalog.lower()} ')
+        adql = (
+            f"SELECT TOP {limit} {columns} FROM {catalog.lower()} "
+            if not count_only
+            else f"SELECT COUNT(*) AS count_all FROM {catalog.lower()} "
+        )
         if region or coordinates or object_name:
             # Check if the catalog supports spatial queries
             if not collection_obj.get_catalog_metadata(catalog).supports_spatial_queries:
-                raise InvalidQueryError(f"Catalog '{catalog}' in collection '{collection_obj.name}' does not "
-                                        "support spatial queries.")
+                raise InvalidQueryError(
+                    f"Catalog '{catalog}' in collection '{collection_obj.name}' does not support spatial queries."
+                )
 
             # Positional query
-            adql_region = ''
+            adql_region = ""
             if region:
                 adql_region = self._create_adql_region(region)
             if object_name or coordinates:  # Cone search
-                coordinates = utils.parse_input_location(coordinates=coordinates,
-                                                         objectname=object_name,
-                                                         resolver=resolver)
+                coordinates = utils.parse_input_location(
+                    coordinates=coordinates, objectname=object_name, resolver=resolver
+                )
                 radius = coord.Angle(radius, u.deg)  # If radius is just a number we assume degrees
-                adql_region = f'CIRCLE(\'ICRS\', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})'
+                adql_region = f"CIRCLE('ICRS', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})"
 
-            region_types = ['POLYGON', 'CIRCLE']
+            region_types = ["POLYGON", "CIRCLE"]
             for region_type in region_types:
                 if region_type in adql_region and region_type not in collection_obj.supported_adql_functions:
-                    raise InvalidQueryError(f"Catalog '{catalog}' in collection '{collection_obj.name}' "
-                                            f"does not support ADQL region type '{region_type}'.")
+                    raise InvalidQueryError(
+                        f"Catalog '{catalog}' in collection '{collection_obj.name}' "
+                        f"does not support ADQL region type '{region_type}'."
+                    )
 
             # Get RA/Dec column names
             ra_col = collection_obj.get_catalog_metadata(catalog).ra_column
             dec_col = collection_obj.get_catalog_metadata(catalog).dec_column
-            adql += (f'WHERE CONTAINS(POINT(\'ICRS\', {ra_col}, {dec_col}), {adql_region}) = 1 ')
+            adql += f"WHERE CONTAINS(POINT('ICRS', {ra_col}, {dec_col}), {adql_region}) = 1 "
 
         # Add additional constraints
         if search_criteria:
             conditions = self._format_criteria_conditions(collection_obj, catalog, search_criteria)
-            if 'WHERE' in adql:
-                adql += 'AND ' + ' AND '.join(conditions)
+            if "WHERE" in adql:
+                adql += "AND " + " AND ".join(conditions)
             else:
-                adql += 'WHERE ' + ' AND '.join(conditions)
+                adql += "WHERE " + " AND ".join(conditions)
 
         # Add sorting if specified
         if sort_by:
@@ -332,15 +375,15 @@ class CatalogsClass(MastQueryWithLogin):
             if len(sort_desc) == 1:
                 sort_desc = [sort_desc[0]] * len(sort_by)
 
-            sort_adql = ''
+            sort_adql = ""
             for col in sort_by:
                 sort_adql += f"{col} " + ("DESC" if sort_desc[sort_by.index(col)] else "ASC") + ", "
 
-            adql += f' ORDER BY {sort_adql.rstrip(", ")}'
+            adql += f" ORDER BY {sort_adql.rstrip(', ')}"
 
         # Add offset
         if offset:
-            adql += f' OFFSET {offset}'
+            adql += f" OFFSET {offset}"
 
         # Execute the query
         result_table = collection_obj.run_tap_query(adql)
@@ -349,23 +392,55 @@ class CatalogsClass(MastQueryWithLogin):
             warnings.warn("The query returned no results.", NoResultsWarning)
 
         if count_only:
-            return result_table['count_all'][0]
+            return result_table["count_all"][0]
         else:
             # TODO: Add schema browser URL to the result table metadata when available
-            result_table.meta['collection'] = collection_obj.name
-            result_table.meta['catalog'] = catalog
+            result_table.meta["collection"] = collection_obj.name
+            result_table.meta["catalog"] = catalog
         return result_table
 
     @class_or_instance
-    @deprecated_renamed_argument('version', None, since='0.4.12', message='The `version` argument is deprecated and '
-                                 'will be removed in a future release. Please use `collection` and `catalog` instead.')
-    @deprecated_renamed_argument('pagesize', None, since='0.4.12', message='The `pagesize` argument is deprecated '
-                                 'and will be removed in a future release. Please use `limit` instead.')
-    @deprecated_renamed_argument('page', None, since='0.4.12', message='The `page` argument is deprecated '
-                                 'and will be removed in a future release. Please use `offset` instead.')
-    def query_region(self, coordinates=None, *, radius=0.2*u.deg, region=None, collection=None,
-                     catalog=None, limit=5000, offset=0, count_only=False, select_cols=None,
-                     sort_by=None, sort_desc=False, filters={}, version=None, pagesize=None, page=None, **criteria):
+    @deprecated_renamed_argument(
+        "version",
+        None,
+        since="0.4.12",
+        message="The `version` argument is deprecated and "
+        "will be removed in a future release. Please use `collection` and `catalog` instead.",
+    )
+    @deprecated_renamed_argument(
+        "pagesize",
+        None,
+        since="0.4.12",
+        message="The `pagesize` argument is deprecated "
+        "and will be removed in a future release. Please use `limit` instead.",
+    )
+    @deprecated_renamed_argument(
+        "page",
+        None,
+        since="0.4.12",
+        message="The `page` argument is deprecated "
+        "and will be removed in a future release. Please use `offset` instead.",
+    )
+    def query_region(
+        self,
+        coordinates=None,
+        *,
+        radius=0.2 * u.deg,
+        region=None,
+        collection=None,
+        catalog=None,
+        limit=5000,
+        offset=0,
+        count_only=False,
+        select_cols=None,
+        sort_by=None,
+        sort_desc=False,
+        filters={},
+        version=None,
+        pagesize=None,
+        page=None,
+        **criteria,
+    ):
         """
         Query for MAST catalog entries within a specified region using criteria filters. To return columns for a given
         collection and catalog, use `~astroquery.mast.collections.get_catalog_metadata`.
@@ -432,37 +507,73 @@ class CatalogsClass(MastQueryWithLogin):
         """
         # Must specify one of region or coordinates
         if region is None and coordinates is None:
-            raise InvalidQueryError('Must specify either `region` or `coordinates`. For non-positional queries, '
-                                    'use `Catalogs.query_criteria`.')
+            raise InvalidQueryError(
+                "Must specify either `region` or `coordinates`. For non-positional queries, "
+                "use `Catalogs.query_criteria`."
+            )
 
         # Parse pagination params
         limit, offset = self._parse_legacy_pagination(limit, offset, pagesize, page)
 
-        return self.query_criteria(collection=collection,
-                                   catalog=catalog,
-                                   coordinates=coordinates,
-                                   region=region,
-                                   radius=radius,
-                                   limit=limit,
-                                   offset=offset,
-                                   count_only=count_only,
-                                   select_cols=select_cols,
-                                   sort_by=sort_by,
-                                   sort_desc=sort_desc,
-                                   filters=filters,
-                                   **criteria)
+        return self.query_criteria(
+            collection=collection,
+            catalog=catalog,
+            coordinates=coordinates,
+            region=region,
+            radius=radius,
+            limit=limit,
+            offset=offset,
+            count_only=count_only,
+            select_cols=select_cols,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+            filters=filters,
+            **criteria,
+        )
 
     @class_or_instance
-    @deprecated_renamed_argument('version', None, since='0.4.12', message='The `version` argument is deprecated and '
-                                 'will be removed in a future release. Please use `collection` and `catalog` instead.')
-    @deprecated_renamed_argument('pagesize', None, since='0.4.12', message='The `pagesize` argument is deprecated '
-                                 'and will be removed in a future release. Please use `limit` instead.')
-    @deprecated_renamed_argument('page', None, since='0.4.12', message='The `page` argument is deprecated '
-                                 'and will be removed in a future release. Please use `offset` instead.')
-    @deprecated_renamed_argument('objectname', 'object_name', since='0.4.12')
-    def query_object(self, object_name, *, radius=0.2*u.deg, collection=None, catalog=None, resolver=None,
-                     limit=5000, offset=0, count_only=False, select_cols=None, sort_by=None, sort_desc=False,
-                     filters={}, version=None, pagesize=None, page=None, **criteria):
+    @deprecated_renamed_argument(
+        "version",
+        None,
+        since="0.4.12",
+        message="The `version` argument is deprecated and "
+        "will be removed in a future release. Please use `collection` and `catalog` instead.",
+    )
+    @deprecated_renamed_argument(
+        "pagesize",
+        None,
+        since="0.4.12",
+        message="The `pagesize` argument is deprecated "
+        "and will be removed in a future release. Please use `limit` instead.",
+    )
+    @deprecated_renamed_argument(
+        "page",
+        None,
+        since="0.4.12",
+        message="The `page` argument is deprecated "
+        "and will be removed in a future release. Please use `offset` instead.",
+    )
+    @deprecated_renamed_argument("objectname", "object_name", since="0.4.12")
+    def query_object(
+        self,
+        object_name,
+        *,
+        radius=0.2 * u.deg,
+        collection=None,
+        catalog=None,
+        resolver=None,
+        limit=5000,
+        offset=0,
+        count_only=False,
+        select_cols=None,
+        sort_by=None,
+        sort_desc=False,
+        filters={},
+        version=None,
+        pagesize=None,
+        page=None,
+        **criteria,
+    ):
         """
         Query for MAST catalog entries around a specified object name using criteria filters. To return columns
         for a given collection and catalog, use `~astroquery.mast.collections.get_catalog_metadata`.
@@ -527,23 +638,24 @@ class CatalogsClass(MastQueryWithLogin):
         # Parse pagination params
         limit, offset = self._parse_legacy_pagination(limit, offset, pagesize, page)
 
-        return self.query_criteria(collection=collection,
-                                   catalog=catalog,
-                                   object_name=object_name,
-                                   radius=radius,
-                                   resolver=resolver,
-                                   limit=limit,
-                                   offset=offset,
-                                   count_only=count_only,
-                                   select_cols=select_cols,
-                                   sort_by=sort_by,
-                                   sort_desc=sort_desc,
-                                   filters=filters,
-                                   **criteria)
+        return self.query_criteria(
+            collection=collection,
+            catalog=catalog,
+            object_name=object_name,
+            radius=radius,
+            resolver=resolver,
+            limit=limit,
+            offset=offset,
+            count_only=count_only,
+            select_cols=select_cols,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+            filters=filters,
+            **criteria,
+        )
 
     @class_or_instance
-    @deprecated(since='v0.4.12',
-                message=('This function is deprecated and will be removed in a future release.'))
+    @deprecated(since="v0.4.12", message=("This function is deprecated and will be removed in a future release."))
     def query_hsc_matchid_async(self, match, *, version=3, pagesize=None, page=None):
         """
         Returns all the matches for a given Hubble Source Catalog MatchID.
@@ -568,7 +680,7 @@ class CatalogsClass(MastQueryWithLogin):
         self._current_connection = self._portal_api_connection
 
         if isinstance(match, Row):
-            match = match['MatchID'] if 'MatchID' in match.colnames else match['matchid']
+            match = match["MatchID"] if "MatchID" in match.colnames else match["matchid"]
         match = str(match)  # np.int64 gives json serializer problems, so stringify right here
 
         if version == 2:
@@ -583,8 +695,7 @@ class CatalogsClass(MastQueryWithLogin):
         return self._current_connection.service_request_async(service, params, pagesize, page)
 
     @class_or_instance
-    @deprecated(since='v0.4.12',
-                message=('This function is deprecated and will be removed in a future release.'))
+    @deprecated(since="v0.4.12", message=("This function is deprecated and will be removed in a future release."))
     def get_hsc_spectra_async(self, *, pagesize=None, page=None):
         """
         Returns all Hubble Source Catalog spectra.
@@ -605,8 +716,7 @@ class CatalogsClass(MastQueryWithLogin):
         self._current_connection = self._portal_api_connection
         return self._current_connection.service_request_async("Mast.HscSpectra.Db.All", {}, pagesize, page)
 
-    @deprecated(since='v0.4.12',
-                message=('This function is deprecated and will be removed in a future release.'))
+    @deprecated(since="v0.4.12", message=("This function is deprecated and will be removed in a future release."))
     def download_hsc_spectra(self, spectra, *, download_dir=None, cache=True, curl_flag=False):
         """
         Download one or more Hubble Source Catalog spectra.
@@ -649,7 +759,7 @@ class CatalogsClass(MastQueryWithLogin):
                 pathList=",".join(path_list),
                 descriptionList=[""] * len(spectra),
                 productTypeList=["spectrum"] * len(spectra),
-                extension="curl"
+                extension="curl",
             )
 
             service = "Mast.Bundle.Request"
@@ -674,11 +784,7 @@ class CatalogsClass(MastQueryWithLogin):
                             else "Curl script could not be downloaded"
                         )
                     ],
-                    "URL": [
-                        None if exists and not missing else (
-                            ",".join(missing) if missing else bundle_info["url"]
-                        )
-                    ],
+                    "URL": [None if exists and not missing else (",".join(missing) if missing else bundle_info["url"])],
                 }
             )
             return manifest
@@ -706,10 +812,7 @@ class CatalogsClass(MastQueryWithLogin):
 
             manifest_rows.append([local_path, status, message, url])
 
-        return Table(
-            rows=manifest_rows,
-            names=("Local Path", "Status", "Message", "URL")
-        )
+        return Table(rows=manifest_rows, names=("Local Path", "Status", "Message", "URL"))
 
     def _parse_result(self, response, *, verbose=False):
         """Parse the async responses from HSC queries."""
@@ -736,14 +839,16 @@ class CatalogsClass(MastQueryWithLogin):
         else:
             if collection in self._renamed_collections:
                 new_name = self._renamed_collections[collection]
-                warn_msg = (f"Collection '{collection}' has been renamed. Please use '{new_name}' instead.")
+                warn_msg = f"Collection '{collection}' has been renamed. Please use '{new_name}' instead."
                 warnings.warn(warn_msg, InputWarning)
                 return new_name
 
             error_msg = ""
             if collection in self._no_longer_supported_collections:
-                error_msg = (f"Collection '{collection}' is no longer supported. To query from this catalog, "
-                             f"please use a version of Astroquery older than 0.4.12.")
+                error_msg = (
+                    f"Collection '{collection}' is no longer supported. To query from this catalog, "
+                    f"please use a version of Astroquery older than 0.4.12."
+                )
             else:
                 closest = difflib.get_close_matches(collection, self.available_collections, n=1)
                 suggestion = f" Did you mean '{closest[0]}'?" if closest else ""
@@ -802,10 +907,16 @@ class CatalogsClass(MastQueryWithLogin):
         else:
             catalog = catalog.lower()
             # For backwards compatibility, check if the user is trying to specify a collection via catalog
-            if ((catalog in self.available_collections or catalog in self._no_longer_supported_collections
-                    or catalog in self._renamed_collections) and not collection):
-                warnings.warn(f"Specifying collection '{catalog}' via the `catalog` parameter is deprecated. "
-                              f"Please use the `collection` parameter instead.", DeprecationWarning)
+            if (
+                catalog in self.available_collections
+                or catalog in self._no_longer_supported_collections
+                or catalog in self._renamed_collections
+            ) and not collection:
+                warnings.warn(
+                    f"Specifying collection '{catalog}' via the `catalog` parameter is deprecated. "
+                    f"Please use the `collection` parameter instead.",
+                    DeprecationWarning,
+                )
                 # As a convenience to the user, set the collection accordingly and use its default catalog
                 collection_obj = self._get_collection_obj(catalog)
                 catalog = collection_obj.default_catalog
@@ -835,7 +946,7 @@ class CatalogsClass(MastQueryWithLogin):
         InvalidQueryError
             If any specified column is not found in the catalog metadata.
         """
-        valid_columns = column_metadata['column_name'].tolist()
+        valid_columns = column_metadata["column_name"].tolist()
         valid_selected = []
         for col in select_cols:
             if col not in valid_columns:
@@ -846,7 +957,7 @@ class CatalogsClass(MastQueryWithLogin):
                 valid_selected.append(col)
         if not valid_selected:
             raise InvalidQueryError("No valid columns specified in `select_cols`.")
-        return ', '.join(valid_selected)
+        return ", ".join(valid_selected)
 
     def _parse_legacy_pagination(self, limit, offset, pagesize, page):
         """
@@ -876,8 +987,11 @@ class CatalogsClass(MastQueryWithLogin):
                 limit = pagesize
                 offset = (page - 1) * pagesize
             elif page is not None:
-                warnings.warn("The 'page' parameter is ignored without 'pagesize'. "
-                              "Please use `limit` and `offset` to specify pagination.", InputWarning)
+                warnings.warn(
+                    "The 'page' parameter is ignored without 'pagesize'. "
+                    "Please use `limit` and `offset` to specify pagination.",
+                    InputWarning,
+                )
         return limit, offset
 
     def _create_adql_region(self, region):
@@ -953,7 +1067,7 @@ class CatalogsClass(MastQueryWithLogin):
             return f"CIRCLE('ICRS',{center.ra.deg},{center.dec.deg},{radius})"
         elif isinstance(region, PolygonSkyRegion):
             verts = region.vertices.icrs
-            point_string = ','.join(f"{v.ra.deg},{v.dec.deg}" for v in verts)
+            point_string = ",".join(f"{v.ra.deg},{v.dec.deg}" for v in verts)
             return f"POLYGON('ICRS',{point_string})"
 
         # Case 3: region is an iterable of coordinate pairs
@@ -986,14 +1100,44 @@ class CatalogsClass(MastQueryWithLogin):
             A set of column names with numeric types.
         """
         meta = collection_obj.get_catalog_metadata(catalog).column_metadata
-        num_types = (
-            'int', 'integer', 'smallint', 'bigint', 'long', 'short',
-            'float', 'double', 'double precision', 'real', 'numeric', 'decimal'
-        )
+        num_types = ("int", "long", "short", "float", "double", "floatComplex", "doubleComplex")
         return {
-            n for n, t in zip(meta["column_name"], meta["datatype"])
-            if isinstance(t, str) and t.lower() in num_types
+            n for n, t in zip(meta["column_name"], meta["datatype"]) if isinstance(t, str) and t.lower() in num_types
         }
+
+    def _get_temporal_columns(self, collection_obj, catalog):
+        """
+        Return a set of column names with temporal/date/time types for a given table.
+
+        Parameters
+        ----------
+        collection_obj : `CatalogCollection`
+            The collection object.
+        catalog : str
+            The catalog name.
+
+        Returns
+        -------
+        set
+            A set of column names that represent time/date values.
+        """
+        meta = collection_obj.get_catalog_metadata(catalog).column_metadata
+        temporal_type_tokens = ("date", "time", "timestamp", "datetime")
+        num_types = ("int", "long", "short", "float", "double", "floatComplex", "doubleComplex")
+
+        temporal_cols = set()
+        for name, datatype, ucd in zip(meta["column_name"], meta["datatype"], meta["ucd"]):
+            dtype = datatype.lower() if isinstance(datatype, str) else ""
+            ucd_val = ucd.lower() if isinstance(ucd, str) else ""
+
+            # Temporal columns may be identified by their datatype containing time-related tokens
+            # or by their UCD starting with 'time.'
+            has_temporal_datatype = any(token in dtype for token in temporal_type_tokens)
+            not_numeric = not any(token in dtype for token in num_types)
+            has_temporal_ucd = ucd_val.startswith("time.") or ";time." in ucd_val
+            if has_temporal_datatype or (has_temporal_ucd and not_numeric):
+                temporal_cols.add(name)
+        return temporal_cols
 
     def _quote_adql_string(self, adql_str):
         """Escape single quotes in ADQL query strings by doubling them."""
@@ -1020,7 +1164,8 @@ class CatalogsClass(MastQueryWithLogin):
         # Check for range (e.g., "5..10")
         range_match = re.fullmatch(
             r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\.\.\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)",
-            expr)
+            expr,
+        )
         if range_match:
             return f"{col} BETWEEN {range_match.group(1)} AND {range_match.group(2)}"
 
@@ -1037,7 +1182,110 @@ class CatalogsClass(MastQueryWithLogin):
                 "ranges like '5..10'."
             )
 
-    def _format_scalar_predicate(self, col, val, numeric_cols):
+    def _normalize_time(self, value):
+        """
+        Normalize a datetime value to a string format suitable for ADQL queries.
+
+        Parameters
+        ----------
+        value : str or `~astropy.time.Time` or `~datetime.datetime`
+            The datetime value to normalize.
+
+        Returns
+        -------
+        str
+            The normalized datetime string in the format 'YYYY-MM-DD HH:MM:SS' or the original
+            value if it cannot be parsed as a datetime.
+
+        Raises
+        ------
+        ValueError
+            If the value cannot be parsed as a datetime.
+        """
+        t = Time(value)
+        dt = t.to_datetime()
+
+        # Drop microseconds to avoid ADQL parsing issues
+        if dt.microsecond:
+            dt = dt.replace(microsecond=0)
+
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _to_temporal_literal(self, value, col):
+        """
+        Convert a datetime value to an ADQL literal string, ensuring it is properly formatted and quoted.
+
+        Parameters
+        ----------
+        value : str or `~astropy.time.Time` or `~datetime.datetime`
+            The datetime value to convert.
+        col : str
+            The column name (used for error messages).
+
+        Returns
+        -------
+        str
+            The ADQL literal string representing the datetime value.
+        """
+        if not value:
+            raise InvalidQueryError(f"Column '{col}' is temporal; empty datetime value is not supported.")
+
+        try:
+            normalized = self._normalize_time(value)
+        except ValueError:
+            # If it can't be parsed as a time, send the value as-is for the backend to handle
+            # (which may raise an error if it's invalid)
+            normalized = value if isinstance(value, str) else str(value)
+        escaped = self._quote_adql_string(normalized)
+        return f"'{escaped}'"
+
+    def _parse_temporal_expr(self, col, expr):
+        """
+        Parse a datetime expression for a column and return the corresponding ADQL predicate.
+
+        Parameters
+        ----------
+        col : str
+            The column name.
+        expr : str
+            Datetime expression (e.g., "2024-01-01", ">=2024-01-01", "2024-01-01..2024-12-31").
+
+        Returns
+        -------
+        str
+            The ADQL predicate for the datetime expression.
+        """
+        col_expr = col
+
+        if isinstance(expr, str):
+            expr = expr.strip()
+
+            # Check for range (e.g., "2024-01-01..2024-12-31")
+            range_match = re.fullmatch(r"(.+?)\s*\.\.\s*(.+)", expr)
+            if range_match:
+                low = self._to_temporal_literal(range_match.group(1).strip(), col)
+                high = self._to_temporal_literal(range_match.group(2).strip(), col)
+                return f"{col_expr} BETWEEN {low} AND {high}"
+
+            # Check for comparison (e.g., ">=2024-01-01", "<=2024-12-31")
+            cmp_match = re.fullmatch(r"(<=|>=|<|>)\s*(.+)", expr)
+            if cmp_match:
+                rhs = self._to_temporal_literal(cmp_match.group(2).strip(), col)
+                return f"{col_expr} {cmp_match.group(1)} {rhs}"
+
+        # For simple equality, expand to a small range
+        try:
+            t0 = Time(self._normalize_time(expr))
+            t1 = t0 + 1 * u.s
+            low = self._quote_adql_string(t0.strftime("%Y-%m-%d %H:%M:%S"))
+            high = self._quote_adql_string(t1.strftime("%Y-%m-%d %H:%M:%S"))
+            return f"{col_expr} BETWEEN '{low}' AND '{high}'"
+        except ValueError:
+            # If it can't be parsed as a time, send the value as-is for the backend to handle
+            # (which may raise an error if it's invalid)
+            return f"{col_expr} = '{expr}'"
+
+    def _format_scalar_predicate(self, col, val, numeric_cols=set(), temporal_cols=set()):
         """
         Build predicate for a scalar value, aware of column type.
 
@@ -1049,6 +1297,8 @@ class CatalogsClass(MastQueryWithLogin):
             The value to build the predicate for.
         numeric_cols : set
             Set of numeric column names.
+        temporal_cols : set
+            Set of temporal column names for better parsing.
 
         Returns
         -------
@@ -1058,9 +1308,16 @@ class CatalogsClass(MastQueryWithLogin):
         if isinstance(val, bool):
             # Booleans stored as integers
             return f"{col} = {int(val)}"
+
+        if col in temporal_cols:
+            is_neg = isinstance(val, str) and val.startswith("!")
+            sval = val[1:].strip() if is_neg else val
+            parsed = self._parse_temporal_expr(col, sval)
+            return f"NOT ({parsed})" if is_neg else parsed
+
         if isinstance(val, str):
             # Check for negation
-            is_neg = val.startswith('!')
+            is_neg = val.startswith("!")
             sval = val[1:].strip() if is_neg else val
 
             # Strings for numeric columns
@@ -1069,8 +1326,8 @@ class CatalogsClass(MastQueryWithLogin):
                 return f"NOT ({parsed})" if is_neg else parsed
 
             # Non-numeric strings
-            has_wild = ('*' in sval) or ('%' in sval)
-            pattern = self._quote_adql_string(sval.replace('*', '%'))
+            has_wild = ("*" in sval) or ("%" in sval)
+            pattern = self._quote_adql_string(sval.replace("*", "%"))
             expr = f"{col} LIKE '{pattern}'" if has_wild else f"{col} = '{pattern}'"
             return f"NOT ({expr})" if is_neg else expr
 
@@ -1093,16 +1350,16 @@ class CatalogsClass(MastQueryWithLogin):
         str
             The combined ADQL predicate.
         """
-        pos_expr = ''
+        pos_expr = ""
         if len(pos_parts) == 1:
             pos_expr = pos_parts[0]
         elif len(pos_parts) > 1:
-            pos_expr = '(' + ' OR '.join(pos_parts) + ')'
+            pos_expr = "(" + " OR ".join(pos_parts) + ")"
 
         if neg_parts and pos_expr:
-            return '(' + ' AND '.join(neg_parts) + ') AND ' + pos_expr
+            return "(" + " AND ".join(neg_parts) + ") AND " + pos_expr
         if neg_parts:
-            return ' AND '.join(neg_parts)
+            return " AND ".join(neg_parts)
         return pos_expr
 
     def _build_numeric_list_predicate(self, col, pos_items, neg_items):
@@ -1126,7 +1383,6 @@ class CatalogsClass(MastQueryWithLogin):
         # Positives: split into simple numbers and complex expressions
         simple_numbers = []
         complex_parts = []
-        print(pos_items)
         for val in pos_items:
             if isinstance(val, (int, float)):
                 simple_numbers.append(val)
@@ -1134,7 +1390,7 @@ class CatalogsClass(MastQueryWithLogin):
                 simple_numbers.append(int(val))
             elif isinstance(val, str):
                 parsed = self._parse_numeric_expr(col, val)
-                if 'BETWEEN' in parsed or '<' in parsed or '>' in parsed:
+                if "BETWEEN" in parsed or "<" in parsed or ">" in parsed:
                     complex_parts.append(parsed)
                 else:
                     simple_numbers.append(float(val))
@@ -1148,10 +1404,7 @@ class CatalogsClass(MastQueryWithLogin):
         pos_parts.extend(complex_parts)
 
         # Negatives: NOT(complex) or != numeric
-        neg_parts = [
-            self._format_scalar_predicate(col, f"!{v}", numeric_cols={col})
-            for v in neg_items
-        ]
+        neg_parts = [self._format_scalar_predicate(col, f"!{v}", numeric_cols={col}) for v in neg_items]
 
         return self._combine_predicates(pos_parts, neg_parts)
 
@@ -1179,8 +1432,8 @@ class CatalogsClass(MastQueryWithLogin):
             if isinstance(v, bool):
                 simple_strings.append(str(int(v)))
             elif isinstance(v, str):
-                if ('*' in v) or ('%' in v):
-                    patt = self._quote_adql_string(v.replace('*', '%'))
+                if ("*" in v) or ("%" in v):
+                    patt = self._quote_adql_string(v.replace("*", "%"))
                     pattern_parts.append(f"{col} LIKE '{patt}'")
                 else:
                     simple_strings.append("'" + self._quote_adql_string(v) + "'")
@@ -1193,11 +1446,30 @@ class CatalogsClass(MastQueryWithLogin):
         pos_parts.extend(pattern_parts)
 
         # Negative predicates → use helper
-        neg_parts = [
-            self._format_scalar_predicate(col, f"!{v}", numeric_cols=set())
-            for v in neg_items
-        ]
+        neg_parts = [self._format_scalar_predicate(col, f"!{v}") for v in neg_items]
 
+        return self._combine_predicates(pos_parts, neg_parts)
+
+    def _build_temporal_list_predicate(self, col, pos_items, neg_items):
+        """
+        Build temporal list predicates using column datatype to choose CAST vs string comparison.
+
+        Parameters
+        ----------
+        col : str
+            The column name.
+        pos_items : list
+            List of positive values.
+        neg_items : list
+            List of negative values.
+
+        Returns
+        -------
+        str
+            The ADQL predicate for the temporal list.
+        """
+        pos_parts = [self._parse_temporal_expr(col, v) for v in pos_items]
+        neg_parts = [self._format_scalar_predicate(col, f"!{v}", temporal_cols={col}) for v in neg_items]
         return self._combine_predicates(pos_parts, neg_parts)
 
     def _format_criteria_conditions(self, collection_obj, catalog, criteria):
@@ -1223,6 +1495,7 @@ class CatalogsClass(MastQueryWithLogin):
             ADQL predicate strings (without leading WHERE/AND), suitable for joining with ' AND '.
         """
         numeric_cols = self._get_numeric_columns(collection_obj, catalog)
+        temporal_cols = self._get_temporal_columns(collection_obj, catalog)
         conditions = []
         for key, value in criteria.items():
             # Handle list-like values => IN or OR(LIKE ...)
@@ -1235,12 +1508,16 @@ class CatalogsClass(MastQueryWithLogin):
                 neg_items = []
                 pos_items = []
                 for v in values:
-                    if isinstance(v, str) and v.startswith('!'):
+                    if isinstance(v, str) and v.startswith("!"):
                         neg_items.append(v[1:].strip())
                     else:
                         pos_items.append(v)
 
-                if key in numeric_cols:
+                if key in temporal_cols:
+                    expr = self._build_temporal_list_predicate(key, pos_items, neg_items)
+                    if expr:
+                        conditions.append(expr)
+                elif key in numeric_cols:
                     expr = self._build_numeric_list_predicate(key, pos_items, neg_items)
                     if expr:
                         conditions.append(expr)
@@ -1249,7 +1526,7 @@ class CatalogsClass(MastQueryWithLogin):
                     if expr:
                         conditions.append(expr)
             else:
-                conditions.append(self._format_scalar_predicate(key, value, numeric_cols))
+                conditions.append(self._format_scalar_predicate(key, value, numeric_cols, temporal_cols))
         return conditions
 
     def _make_data_url(self, row):
