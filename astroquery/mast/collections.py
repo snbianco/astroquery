@@ -323,7 +323,7 @@ class CatalogsClass(MastQueryWithLogin):
         adql = (
             f"SELECT TOP {limit} {columns} FROM {catalog.lower()} "
             if not count_only
-            else f"SELECT COUNT(*) AS count_all FROM {catalog.lower()} "
+            else f"SELECT TOP 1 COUNT(*) AS count_all FROM {catalog.lower()} "
         )
         if region or coordinates or object_name:
             # Check if the catalog supports spatial queries

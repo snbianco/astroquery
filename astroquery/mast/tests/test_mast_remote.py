@@ -1,25 +1,23 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-import logging
-from pathlib import Path
-import numpy as np
-import os
-import pytest
 import json
+import logging
+import os
+from pathlib import Path
 
-from requests.models import Response
-
-from astropy.table import Table, unique
+import astropy.units as u
+import numpy as np
+import pytest
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-import astropy.units as u
+from astropy.table import Table, unique
+from requests.models import Response
 
-from astroquery.mast import Observations, utils, Mast, Catalogs, Hapcut, Tesscut, Zcut, MastMissions
+from astroquery.mast import Catalogs, Hapcut, Mast, MastMissions, Observations, Tesscut, Zcut, utils
 
-from ..catalog_collection import CatalogMetadata, CatalogCollection, DEFAULT_CATALOGS
+from ...exceptions import InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning
+from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
 from ..utils import ResolverError
-from ...exceptions import (InputWarning, InvalidQueryError, MaxResultsWarning,
-                           NoResultsWarning)
 
 
 @pytest.fixture(scope="module")
@@ -1109,13 +1107,15 @@ class TestMast:
         c = Catalogs()
         search_coord = SkyCoord(322.49324, 12.16683, unit="deg")
         select_cols = ["matchid", "matchra", "matchdec", "numimages", "starttime", "targetname"]
-        result = c.query_criteria(coordinates=search_coord,
-                                  radius="2 arcsec",
-                                  sort_by=["numimages", "starttime"],
-                                  sort_desc=[False, True],
-                                  targetname=["M-15", "NGC*"],
-                                  limit=5,
-                                  select_cols=select_cols)
+        result = c.query_criteria(
+            coordinates=search_coord,
+            radius="2 arcsec",
+            sort_by=["numimages", "starttime"],
+            sort_desc=[False, True],
+            targetname=["M-15", "NGC*"],
+            limit=5,
+            select_cols=select_cols,
+        )
         assert isinstance(result, Table)
         assert len(result) == 5
         assert all(c in result.colnames for c in select_cols)
@@ -1133,19 +1133,29 @@ class TestMast:
         )
 
         # Non-positional query with multiple filters and select_cols
-        select_cols = ["target_name_ullyses", "target_classification", "known_binary", "sp_class", "gaia_parallax",
-                       "star_teff", "coordinate_epoch", "spectral_type_ref"]
-        result = c.query_criteria(collection="ullyses",
-                                  catalog="sciencemetadata",
-                                  target_name_ullyses="NGC*",
-                                  target_classification=["!Galaxy", "!Late O Dwarf"],
-                                  known_binary=False,
-                                  sp_class=["O", "B"],
-                                  gaia_parallax=["<-0.01", ">=0", "!<-0.3"],
-                                  star_teff="30000..50000",
-                                  coordinate_epoch=2016,
-                                  spectral_type_ref=[51, 18, 59],
-                                  select_cols=select_cols)
+        select_cols = [
+            "target_name_ullyses",
+            "target_classification",
+            "known_binary",
+            "sp_class",
+            "gaia_parallax",
+            "star_teff",
+            "coordinate_epoch",
+            "spectral_type_ref",
+        ]
+        result = c.query_criteria(
+            collection="ullyses",
+            catalog="sciencemetadata",
+            target_name_ullyses="NGC*",
+            target_classification=["!Galaxy", "!Late O Dwarf"],
+            known_binary=False,
+            sp_class=["O", "B"],
+            gaia_parallax=["<-0.01", ">=0", "!<-0.3"],
+            star_teff="30000..50000",
+            coordinate_epoch=2016,
+            spectral_type_ref=[51, 18, 59],
+            select_cols=select_cols,
+        )
         assert isinstance(result, Table)
         assert len(result) > 0
         assert all(str(val).startswith("NGC") for val in result["target_name_ullyses"])
@@ -1153,29 +1163,21 @@ class TestMast:
         assert all(result["target_classification"] != "Late O Dwarf")
         assert not any(result["known_binary"])
         assert all(np.isin(result["sp_class"], ["O", "B"]))
-        assert all((result["gaia_parallax"] < -0.01) | (result["gaia_parallax"] >= 0)
-                   | (result["gaia_parallax"] >= -0.3))
+        assert all(
+            (result["gaia_parallax"] < -0.01) | (result["gaia_parallax"] >= 0) | (result["gaia_parallax"] >= -0.3)
+        )
         assert all((result["star_teff"] >= 30000) & (result["star_teff"] <= 50000))
         assert all(result["coordinate_epoch"] == 2016)
         assert all(np.isin(result["spectral_type_ref"], [51, 18, 59, 1]))
         assert all(c in result.colnames for c in select_cols)
 
         # Test offset
-        result = c.query_criteria(collection="ps1_dr2",
-                                  skycelliD=42,
-                                  sort_by="objname",
-                                  limit=5)
-        result_offset = c.query_criteria(collection="ps1_dr2",
-                                         skycelliD=42,
-                                         sort_by="objname",
-                                         limit=5,
-                                         offset=2)
+        result = c.query_criteria(collection="ps1_dr2", skycelliD=42, sort_by="objname", limit=5)
+        result_offset = c.query_criteria(collection="ps1_dr2", skycelliD=42, sort_by="objname", limit=5, offset=2)
         assert result_offset["objname"][0] == result["objname"][2]
 
         # Count only
-        result_count = c.query_criteria(collection="ps1_dr2",
-                                        skycelliD=42,
-                                        count_only=True)
+        result_count = c.query_criteria(collection="ps1_dr2", skycelliD=42, count_only=True)
         assert isinstance(result_count, (int, np.integer))
         assert result_count > 0
 
@@ -1190,10 +1192,12 @@ class TestMast:
     def test_catalogs_query_region(self):
         # Region search with polygon
         select_cols = ["target_name", "obs_id", "s_ra", "s_dec", "s_region"]
-        result = Catalogs.query_region(collection="caom",
-                                       region="POLYGON ICRS 18.85 -6.95 18.86 -6.95 18.86 -6.94 18.85 -6.94",
-                                       limit=5,
-                                       select_cols=select_cols)
+        result = Catalogs.query_region(
+            collection="caom",
+            region="POLYGON ICRS 18.85 -6.95 18.86 -6.95 18.86 -6.94 18.85 -6.94",
+            limit=5,
+            select_cols=select_cols,
+        )
         assert isinstance(result, Table)
         assert len(result) <= 5
         assert all(c in result.colnames for c in select_cols)
@@ -1206,10 +1210,9 @@ class TestMast:
         assert all(separation <= 0.1 * u.deg)
 
         # Region search with circle
-        result = Catalogs.query_region(collection="caom",
-                                       region="CIRCLE ICRS 18.85 -6.95 0.1",
-                                       limit=5,
-                                       select_cols=select_cols)
+        result = Catalogs.query_region(
+            collection="caom", region="CIRCLE ICRS 18.85 -6.95 0.1", limit=5, select_cols=select_cols
+        )
         assert isinstance(result, Table)
         assert len(result) <= 5
         assert all(c in result.colnames for c in select_cols)
@@ -1222,10 +1225,7 @@ class TestMast:
     def test_catalogs_query_object(self):
         # Object search
         select_cols = ["target_name", "obs_id", "s_ra", "s_dec"]
-        result = Catalogs.query_object(collection="caom",
-                                       object_name="M2",
-                                       limit=5,
-                                       select_cols=select_cols)
+        result = Catalogs.query_object(collection="caom", object_name="M2", limit=5, select_cols=select_cols)
         assert isinstance(result, Table)
         assert len(result) <= 5
         assert all(c in result.colnames for c in select_cols)
@@ -1235,10 +1235,9 @@ class TestMast:
         separation = coords.separation(m2_coords)
         assert all(separation <= 0.1 * u.deg)
 
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyDeprecationWarning")
     def test_catalogs_query_hsc_matchid_async(self):
-        catalogData = Catalogs.query_object("M10",
-                                            radius=.001,
-                                            collection="HSC")
+        catalogData = Catalogs.query_object("M10", radius=0.001, collection="HSC")
 
         responses = Catalogs.query_hsc_matchid_async(catalogData[0])
         assert isinstance(responses, list)
@@ -1246,37 +1245,38 @@ class TestMast:
         responses = Catalogs.query_hsc_matchid_async(catalogData[0]["matchid"])
         assert isinstance(responses, list)
 
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyDeprecationWarning")
     def test_catalogs_query_hsc_matchid(self):
-        catalogData = Catalogs.query_object("M10",
-                                            radius=.001,
-                                            collection="HSC")
+        catalogData = Catalogs.query_object("M10", radius=0.001, collection="HSC")
         matchid = str(catalogData[0]["matchid"])
 
         result = Catalogs.query_hsc_matchid(catalogData[0])
         assert isinstance(result, Table)
-        assert (result['MatchID'].value == matchid).all()
+        assert (result["MatchID"].value == matchid).all()
 
         result2 = Catalogs.query_hsc_matchid(matchid)
         assert isinstance(result2, Table)
         assert len(result2) == len(result)
-        assert (result2['MatchID'] == matchid).all()
+        assert (result2["MatchID"] == matchid).all()
 
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyDeprecationWarning")
     def test_catalogs_get_hsc_spectra_async(self):
         responses = Catalogs.get_hsc_spectra_async()
         assert isinstance(responses, list)
 
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyDeprecationWarning")
     def test_catalogs_get_hsc_spectra(self):
         result = Catalogs.get_hsc_spectra()
         assert isinstance(result, Table)
         assert result[np.where(result["MatchID"] == "19657846")]
         assert result[np.where(result["DatasetName"] == "HAG_J072657.06+691415.5_J8HPAXAEQ_V01.SPEC1D")]
 
+    @pytest.mark.filterwarnings("ignore::astropy.utils.exceptions.AstropyDeprecationWarning")
     def test_catalogs_download_hsc_spectra(self, tmpdir):
         allSpectra = Catalogs.get_hsc_spectra()
 
         # actually download the products
-        result = Catalogs.download_hsc_spectra(allSpectra[10],
-                                               download_dir=str(tmpdir))
+        result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
         assert isinstance(result, Table)
 
         for row in result:
@@ -1284,8 +1284,7 @@ class TestMast:
                 assert os.path.isfile(row["Local Path"])
 
         # just get the curl script
-        result = Catalogs.download_hsc_spectra(allSpectra[20:24],
-                                               download_dir=str(tmpdir), curl_flag=True)
+        result = Catalogs.download_hsc_spectra(allSpectra[20:24], download_dir=str(tmpdir), curl_flag=True)
         assert isinstance(result, Table)
         assert os.path.isfile(result["Local Path"][0])
 
@@ -1341,8 +1340,9 @@ class TestMast:
     def test_catalog_collection_invalid_get_catalog_metadata(self):
         cc = CatalogCollection("TIC")
         invalid_catalog = "invalid_catalog"
-        with pytest.raises(InvalidQueryError, match=f"Catalog '{invalid_catalog}' is not "
-                           f"recognized for collection '{cc.name}'."):
+        with pytest.raises(
+            InvalidQueryError, match=f"Catalog '{invalid_catalog}' is not recognized for collection '{cc.name}'."
+        ):
             cc.get_catalog_metadata(invalid_catalog)
 
     @pytest.mark.parametrize("collection", ["tic", "classy", "ullyses"])
@@ -1361,8 +1361,10 @@ class TestMast:
 
     def test_catalog_collection_run_tap_query(self):
         cc = CatalogCollection("GAIADR3")
-        adql_str = "SELECT TOP 10 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE " \
-                   "ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+        adql_str = (
+            "SELECT TOP 10 solution_id, designation, source_id, ra, dec FROM gaia_source WHERE "
+            "ra BETWEEN 10 AND 11 AND dec BETWEEN 12 AND 13"
+        )
         result = cc.run_tap_query(adql_str)
 
         assert isinstance(result, Table)
@@ -1384,13 +1386,19 @@ class TestMast:
         assert result is None
 
         close_match_col = "gaiagaiabp"
-        with pytest.raises(InvalidQueryError, match=f"Filter '{close_match_col}' is not recognized for collection "
-                           f"'{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?"):
+        with pytest.raises(
+            InvalidQueryError,
+            match=f"Filter '{close_match_col}' is not recognized for collection "
+            f"'{cc.name}' and catalog '{default_catalog}'. Did you mean 'gaiabp'?",
+        ):
             cc._verify_criteria(default_catalog, gaiagaiabp=1)
 
         invalid_col = "fake_column"
-        with pytest.raises(InvalidQueryError, match=f"Filter '{invalid_col}' is not recognized for collection "
-                           f"'{cc.name}' and catalog '{default_catalog}'."):
+        with pytest.raises(
+            InvalidQueryError,
+            match=f"Filter '{invalid_col}' is not recognized for collection "
+            f"'{cc.name}' and catalog '{default_catalog}'.",
+        ):
             cc._verify_criteria(default_catalog, fake_column=1)
 
     ######################

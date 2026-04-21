@@ -2,36 +2,36 @@ import difflib
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from pyvo.dal import TAPService, DALQueryError
 from astropy.table import Table
+from pyvo.dal import DALQueryError, TAPService
 
-from . import conf, utils
 from .. import log
 from ..exceptions import InvalidQueryError
+from . import conf, utils
 
-__all__ = ['CatalogCollection']
+__all__ = ["CatalogCollection"]
 
 DEFAULT_CATALOGS = {
-    'caom': 'dbo.obspointing',
-    'gaiadr3': 'dbo.gaia_source',
-    'hsc': 'dbo.SumMagAper2CatView',
-    'hscv2': 'dbo.SumMagAper2CatView',
-    'missionmast': 'dbo.hst_science_missionmast',
-    'ps1dr1': 'dbo.MeanObjectView',
-    'ps1dr2': 'dbo.MeanObjectView',
-    'ps1_dr2': 'ps1_dr2.forced_mean_object',
-    'skymapperdr4': 'dr4.master',
-    'tic': 'dbo.CatalogRecord',
-    'classy': 'dbo.targets',
-    'ullyses': 'dbo.sciencemetadata',
-    'goods': 'dbo.goods_master_view',
-    '3dhst': 'dbo.HLSP_3DHST_summary',
-    'candels': 'dbo.candels_master_view',
-    'deepspace': 'dbo.DeepSpace_Summary',
-    'tic_v82': 'tic_v82.source'
+    "caom": "dbo.obspointing",
+    "gaiadr3": "dbo.gaia_source",
+    "hsc": "dbo.SumMagAper2CatView",
+    "hscv2": "dbo.SumMagAper2CatView",
+    "missionmast": "dbo.hst_science_missionmast",
+    "ps1dr1": "dbo.MeanObjectView",
+    "ps1dr2": "dbo.MeanObjectView",
+    "ps1_dr2": "ps1_dr2.forced_mean_object",
+    "skymapperdr4": "dr4.master",
+    "tic": "dbo.CatalogRecord",
+    "classy": "dbo.targets",
+    "ullyses": "dbo.sciencemetadata",
+    "goods": "dbo.goods_master_view",
+    "3dhst": "dbo.HLSP_3DHST_summary",
+    "candels": "dbo.candels_master_view",
+    "deepspace": "dbo.DeepSpace_Summary",
+    "tic_v82": "tic_v82.source",
 }
 
-GROUPED_COLLECTION_ENDPOINTS = ['mast_catalogs', 'roman_catalogs']
+GROUPED_COLLECTION_ENDPOINTS = ["mast_catalogs", "roman_catalogs"]
 
 
 @dataclass
@@ -40,6 +40,7 @@ class CatalogMetadata:
     Data class to hold metadata about a catalog, including column metadata,
     RA/Dec column names, and spatial query support.
     """
+
     column_metadata: Table
     ra_column: Optional[str]
     dec_column: Optional[str]
@@ -51,7 +52,7 @@ class CatalogCollection:
     This class provides an interface to interact with MAST catalog collections via TAP service.
     """
 
-    TAP_BASE_URL = conf.server + '/vo-tap/api/v0.1/'
+    TAP_BASE_URL = conf.server + "/vo-tap/api/v0.1/"
     _discovered_collections = None
     _collection_parent_map = None
 
@@ -69,12 +70,12 @@ class CatalogCollection:
             return cls._discovered_collections
 
         # Query TAP service for collection names
-        url = cls.TAP_BASE_URL + 'openapi.json'
+        url = cls.TAP_BASE_URL + "openapi.json"
         response = utils._simple_request(url)
         response.raise_for_status()
         data = response.json()
 
-        collection_enum = data['components']['schemas']['CatalogName']['enum']
+        collection_enum = data["components"]["schemas"]["CatalogName"]["enum"]
         collection_parent_map = {}
 
         # Discover collections stored under grouped TAP collections
@@ -83,15 +84,15 @@ class CatalogCollection:
                 continue
 
             tap_service = TAPService(cls.TAP_BASE_URL + parent_collection)
-            result = tap_service.run_sync('SELECT table_name FROM tap_schema.tables')
+            result = tap_service.run_sync("SELECT TOP 5000 table_name FROM tap_schema.tables")
             tables = result.to_table()
 
-            for table_name in tables['table_name']:
+            for table_name in tables["table_name"]:
                 table_name = str(table_name)
-                if table_name.lower().startswith('tap_schema.'):
+                if table_name.lower().startswith("tap_schema."):
                     continue
 
-                collection_name = table_name.split('.', 1)[0].lower()
+                collection_name = table_name.split(".", 1)[0].lower()
                 collection_parent_map.setdefault(collection_name, parent_collection)
 
         # Include standalone collections in map
@@ -106,7 +107,7 @@ class CatalogCollection:
         cls._collection_parent_map = collection_parent_map
         cls._discovered_collections = Table(
             [collection_names, parent_names],
-            names=('collection_name', 'parent_collection'),
+            names=("collection_name", "parent_collection"),
         )
 
         return cls._discovered_collections
@@ -179,7 +180,7 @@ class CatalogCollection:
 
     @property
     def catalog_names(self):
-        return self.catalogs['catalog_name'].tolist()
+        return self.catalogs["catalog_name"].tolist()
 
     @property
     def supported_adql_functions(self):
@@ -216,17 +217,16 @@ class CatalogCollection:
         ra_col, dec_col = self._get_ra_dec_column_names(metadata)
 
         # Determine if spatial queries are supported
-        supports_adql_geometry = all(
-            func in self.supported_adql_functions
-            for func in ('POINT', 'CIRCLE', 'CONTAINS')
-        )
+        supports_adql_geometry = all(func in self.supported_adql_functions for func in ("POINT", "CIRCLE", "CONTAINS"))
 
         # Try an inexpensive spatial query if RA/Dec columns are known
-        supports_spatial_queries = (supports_adql_geometry and ra_col is not None and dec_col is not None)
+        supports_spatial_queries = supports_adql_geometry and ra_col is not None and dec_col is not None
         if supports_spatial_queries:
             # If an ra and dec column exist, test spatial query support
-            spatial_query = (f'SELECT TOP 0 * FROM {catalog} WHERE CONTAINS(POINT(\'ICRS\', {ra_col}, {dec_col}), '
-                             'CIRCLE(\'ICRS\', 0, 0, 0.001)) = 1')
+            spatial_query = (
+                f"SELECT TOP 0 * FROM {catalog} WHERE CONTAINS(POINT('ICRS', {ra_col}, {dec_col}), "
+                "CIRCLE('ICRS', 0, 0, 0.001)) = 1"
+            )
             try:
                 self.tap_service.search(spatial_query)
             except DALQueryError:
@@ -296,7 +296,7 @@ class CatalogCollection:
             List of catalog names.
         """
         log.debug(f"Fetching available tables for collection '{self.name}' from MAST TAP service.")
-        query = 'SELECT table_name, description FROM tap_schema.tables'
+        query = "SELECT TOP 5000 table_name, description FROM tap_schema.tables"
 
         # If this catalog is within a grouped collection, filter to only tables that belong to this collection
         if self.parent_collection in GROUPED_COLLECTION_ENDPOINTS:
@@ -306,7 +306,7 @@ class CatalogCollection:
 
         # Rename table_name to catalog_name for clarity
         result_table = result.to_table()
-        result_table.rename_column('table_name', 'catalog_name')
+        result_table.rename_column("table_name", "catalog_name")
 
         return result_table
 
@@ -319,15 +319,15 @@ class CatalogCollection:
         list
             A list of supported ADQL functions.
         """
-        adql_functions = ['CIRCLE', 'POLYGON', 'POINT', 'CONTAINS', 'INTERSECTS']
+        adql_functions = ["CIRCLE", "POLYGON", "POINT", "CONTAINS", "INTERSECTS"]
         supported = []
-        feature_id = 'ivo://ivoa.net/std/TAPRegExt#features-adqlgeo'
+        feature_id = "ivo://ivoa.net/std/TAPRegExt#features-adqlgeo"
         for capability in self.tap_service.capabilities:
-            if capability.standardid != 'ivo://ivoa.net/std/TAP':
+            if capability.standardid != "ivo://ivoa.net/std/TAP":
                 continue
 
             for lang in capability.languages:
-                if lang.name != 'ADQL':
+                if lang.name != "ADQL":
                     continue
 
                 for func in adql_functions:
@@ -364,7 +364,7 @@ class CatalogCollection:
         for cat in self.catalog_names:
             cat_lower = cat.lower()
             lookup[cat_lower] = cat  # case-insensitive match
-            no_prefix = cat_lower.split('.')[-1]
+            no_prefix = cat_lower.split(".")[-1]
             if no_prefix not in no_prefix_map:
                 no_prefix_map[no_prefix] = [cat]  # no-prefix match (first occurrence)
             else:
@@ -381,7 +381,7 @@ class CatalogCollection:
 
         # Check for ambiguous no-prefix matches
         if catalog in no_prefix_map and len(no_prefix_map[catalog]) > 1:
-            matches = ', '.join(no_prefix_map[catalog])
+            matches = ", ".join(no_prefix_map[catalog])
             raise InvalidQueryError(
                 f"Catalog '{catalog}' is ambiguous for collection '{self.name}'. "
                 f"It matches multiple catalogs: {matches}. Please specify the full catalog name."
@@ -413,7 +413,7 @@ class CatalogCollection:
         log.debug(f"Fetching column metadata for collection '{self.name}', catalog '{catalog}' from MAST TAP service.")
 
         query = f"""
-            SELECT
+            SELECT TOP 5000
                 column_name,
                 datatype,
                 unit,
@@ -447,12 +447,12 @@ class CatalogCollection:
         # Look for a column with UCD 'pos.eq.ra;meta.main' and 'pos.eq.dec;meta.main'
         ra_col = None
         dec_col = None
-        for name, ucd in zip(column_metadata['column_name'], column_metadata['ucd']):
-            if ucd and 'pos.eq.ra;meta.main' in ucd:
+        for name, ucd in zip(column_metadata["column_name"], column_metadata["ucd"]):
+            if ucd and "pos.eq.ra;meta.main" in ucd:
                 # TODO: ps1_dr2.mean_object and ps1_dr2.stacked_object has a column that can be used,
                 # but is not labeled with "meta.main"
                 ra_col = name
-            elif ucd and 'pos.eq.dec;meta.main' in ucd:
+            elif ucd and "pos.eq.dec;meta.main" in ucd:
                 dec_col = name
         return ra_col, dec_col
 
@@ -475,7 +475,7 @@ class CatalogCollection:
         """
         if not criteria:
             return
-        col_names = list(self.get_catalog_metadata(catalog).column_metadata['column_name'])
+        col_names = list(self.get_catalog_metadata(catalog).column_metadata["column_name"])
         col_name_lookup = {col.lower(): col for col in col_names}
 
         # Check each criteria argument for validity

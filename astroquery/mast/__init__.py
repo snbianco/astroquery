@@ -14,37 +14,36 @@ class Conf(_config.ConfigNamespace):
     Configuration parameters for `astroquery.mast`.
     """
 
-    server = _config.ConfigItem(
-        'https://masttest.stsci.edu',
-        'Name of the MAST server.')
-    ssoserver = _config.ConfigItem(
-        'https://ssoportal.stsci.edu',
-        'MAST SSO Portal server.')
-    catalogs_server = _config.ConfigItem(
-        'https://catalogs.mast.stsci.edu',
-        'Catalogs.MAST server.')
-    timeout = _config.ConfigItem(
-        600,
-        'Time limit for requests from the STScI server.')
-    pagesize = _config.ConfigItem(
-        50000,
-        'Number of results to request at once from the STScI server.')
+    server = _config.ConfigItem("https://masttest.stsci.edu", "Name of the MAST server.")
+    ssoserver = _config.ConfigItem("https://ssoportal.stsci.edu", "MAST SSO Portal server.")
+    timeout = _config.ConfigItem(600, "Time limit for requests from the STScI server.")
+    pagesize = _config.ConfigItem(50000, "Number of results to request at once from the STScI server.")
 
 
 conf = Conf()
 
-from .cutouts import TesscutClass, Tesscut, ZcutClass, Zcut, HapcutClass, Hapcut
-from .observations import Observations, ObservationsClass, MastClass, Mast
-from .collections import Catalogs, CatalogsClass
-from .missions import MastMissions, MastMissionsClass
 from . import utils
+from .collections import Catalogs, CatalogsClass
+from .cutouts import Hapcut, HapcutClass, Tesscut, TesscutClass, Zcut, ZcutClass
+from .missions import MastMissions, MastMissionsClass
+from .observations import Mast, MastClass, Observations, ObservationsClass
 
-__all__ = ['Observations', 'ObservationsClass',
-           'Catalogs', 'CatalogsClass',
-           'MastMissions', 'MastMissionsClass',
-           'Mast', 'MastClass',
-           'Tesscut', 'TesscutClass',
-           'Zcut', 'ZcutClass',
-           'Hapcut', 'HapcutClass',
-           'Conf', 'conf', 'utils',
-           ]
+__all__ = [
+    "Observations",
+    "ObservationsClass",
+    "Catalogs",
+    "CatalogsClass",
+    "MastMissions",
+    "MastMissionsClass",
+    "Mast",
+    "MastClass",
+    "Tesscut",
+    "TesscutClass",
+    "Zcut",
+    "ZcutClass",
+    "Hapcut",
+    "HapcutClass",
+    "Conf",
+    "conf",
+    "utils",
+]
