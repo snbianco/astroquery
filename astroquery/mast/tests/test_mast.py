@@ -11,6 +11,8 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import numpy as np
+from datetime import datetime
+from astropy.time import Time
 from astropy.table import Table, unique
 from astropy.coordinates import SkyCoord, Angle
 from regions import CircleSkyRegion, PolygonSkyRegion, PixCoord, CirclePixelRegion
@@ -118,6 +120,12 @@ def patch_tap(request, reset_catalogs_cache):
 def reset_catalogs_cache():
     Catalogs._collections_cache.clear()
     yield
+
+
+def get_patch_tap_query(patch_tap):
+    args, _ = patch_tap.run_sync.call_args
+    query = args[0]
+    return query
 
 
 def post_mockreturn(self, method="POST", url=None, data=None, timeout=10, **kwargs):
@@ -1376,6 +1384,28 @@ def test_observations_get_cloud_uris_query(mock_client, patch_post):
 #######################
 
 
+def test_catalogs_attributes(patch_tap):
+    Catalogs.query_criteria(
+        collection="tic",
+        region="Circle ICRS 202.4656816 +47.1999842 0.04",
+        radius=0.002 * u.deg,
+        offset=1,
+        sort_by="ra",
+    )
+    assert isinstance(Catalogs.collection, CatalogCollection)
+    assert Catalogs.catalog == "dbo.SumMagAper2CatView"
+
+
+def test_catalogs_get_catalogs(patch_tap):
+    catalogs = Catalogs.get_catalogs("tic")
+    assert isinstance(catalogs, Table)
+
+
+def test_catalogs_get_catalog_metadata(patch_tap):
+    metadata = Catalogs.get_catalog_metadata(collection="tic")
+    assert isinstance(metadata, Table)
+
+
 def test_catalogs_query_criteria(patch_tap):
     # coordinates
     result = Catalogs.query_criteria(
@@ -1388,8 +1418,7 @@ def test_catalogs_query_criteria(patch_tap):
     assert isinstance(result, Table)
     assert len(result) > 0
     assert "dec" in result.colnames
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
+    query = get_patch_tap_query(patch_tap)
     assert "FROM dbo.catalogrecord" in query
     assert "CONTAINS" in query
     assert "CIRCLE" in query
@@ -1407,45 +1436,33 @@ def test_catalogs_query_criteria(patch_tap):
     assert isinstance(result, Table)
     assert len(result) > 0
     assert "dec" in result.colnames
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
+    query = get_patch_tap_query(patch_tap)
     assert "FROM dbo.catalogrecord" in query
     assert "CONTAINS" in query
     assert "CIRCLE" in query
     assert "OFFSET" in query
     assert "ORDER BY" in query
 
-    # misc checks
-    assert isinstance(Catalogs.collection, CatalogCollection)
-    assert Catalogs.catalog == "dbo.SumMagAper2CatView"
-    catalogs = Catalogs.get_catalogs("tic")
-    assert isinstance(catalogs, Table)
-
-    metadata = Catalogs.get_catalog_metadata(collection="tic")
-    assert isinstance(metadata, Table)
-
 
 def test_catalogs_invalid_query_criteria(patch_tap):
-    #specifying both region and coordinates
-    with pytest.raises(InvalidQueryError) as invalid_query:
+    # specifying both region and coordinates
+    with pytest.raises(InvalidQueryError, match="Specify either `region` or `coordinates`"):
         Catalogs.query_criteria(
             collection="tic",
             coordinates=regionCoords,
             region="Circle ICRS 202.4656816 +47.1999842 0.04"
         )
-        assert "Specify either `region` or `coordinates`" in invalid_query
 
-    #specifying both region and objectname
-    with pytest.raises(InvalidQueryError) as invalid_query:
+    # specifying both region and object_name
+    with pytest.raises(InvalidQueryError, match="Specify either `region` or `object_name`"):
         Catalogs.query_criteria(
             collection="tic",
             object_name="M31",
             region="Circle ICRS 202.4656816 +47.1999842 0.04"
         )
-        assert "Specify either `region` or `objectname`" in invalid_query
 
     # named parameters and filters dict specifying criteria
-    with pytest.raises(InvalidQueryError) as invalid_query:
+    with pytest.raises(InvalidQueryError, match="Criteria specified both"):
         Catalogs.query_criteria(
             collection="tic",
             object_name="M31",
@@ -1454,7 +1471,6 @@ def test_catalogs_invalid_query_criteria(patch_tap):
                 "file_suffix":['A', 'B', '!C'],
             }
         )
-        assert "Criteria specified both" in invalid_query
 
     # sort_by cols and sort_desc different lengths
     with pytest.raises(InvalidQueryError, match="must be 1 or equal to length of 'sort_by'"):
@@ -1473,6 +1489,13 @@ def test_catalogs_invalid_query_criteria(patch_tap):
             sort_by="fake",
         )
 
+    # invalid filter
+    with pytest.raises(InvalidQueryError, match="Filter 'fake' is not recognized"):
+        Catalogs.query_criteria(
+            collection="tic",
+            fake=1
+        )
+
 
 def test_catalogs_query_region(patch_tap):
     # passing region coords and radius
@@ -1485,8 +1508,7 @@ def test_catalogs_query_region(patch_tap):
     assert isinstance(result, Table)
     assert len(result) > 0
     assert "ra" in result.colnames
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
+    query = get_patch_tap_query(patch_tap)
     assert "FROM dbo.catalogrecord" in query
     assert "CONTAINS" in query
     assert "CIRCLE" in query
@@ -1495,11 +1517,10 @@ def test_catalogs_query_region(patch_tap):
 
 def test_catalogs_invalid_query_region():
     # query_region without region or coordinates
-    with pytest.raises(InvalidQueryError) as invalid_query:
+    with pytest.raises(InvalidQueryError, match="Must specify either `region` or `coordinates`"):
         Catalogs.query_region(
             collection="tic",
         )
-        assert "Must specify either `region` or `coordinates`" in invalid_query
 
 
 def test_catalogs_query_object(patch_tap):
@@ -1514,8 +1535,7 @@ def test_catalogs_query_object(patch_tap):
     assert isinstance(result, Table)
     assert len(result) > 0
     assert "ra" in result.colnames
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
+    query = get_patch_tap_query(patch_tap)
     assert "FROM dbo.catalogrecord" in query
     assert "CONTAINS" in query
     assert "POINT" in query
@@ -1528,6 +1548,15 @@ def test_catalogs_init_with_catalog(patch_tap):
         catalog="tap_schema.schemas"
     )
     assert catalog.catalog == "tap_schema.schemas"
+
+
+def test_catalogs_setting_catalog(patch_tap):
+    catalog = Catalogs(
+        collection="tic",
+        catalog="tap_schema.schemas"
+    )
+    catalog.catalog = "tap_schema.key_columns"
+    assert catalog.catalog == "tap_schema.key_columns"
 
 
 def test_catalogs_get_collections_cached(patch_tap):
@@ -1548,54 +1577,6 @@ def test_catalogs_supports_spatial_queries(patch_tap):
 
     assert isinstance(result, bool)
     assert result
-
-
-def test_catalogs_query_hsc_matchid_async(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        responses = Catalogs.query_hsc_matchid_async(82371983)
-        assert isinstance(responses, list)
-
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        responses = Catalogs.query_hsc_matchid_async(82371983, version=2)
-        assert isinstance(responses, list)
-
-    with pytest.warns((AstropyDeprecationWarning, InputWarning)) as record:
-        Catalogs.query_hsc_matchid_async(82371983, version=5)
-        messages = [str(w.message) for w in record]
-        assert any("This function is deprecated" in m for m in messages)
-        assert any("Invalid HSC version number" in m for m in messages)
-
-
-def test_catalogs_query_hsc_matchid(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        result = Catalogs.query_hsc_matchid(82371983)
-        assert isinstance(result, Table)
-
-
-def test_catalogs_get_hsc_spectra_async(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        responses = Catalogs.get_hsc_spectra_async()
-        assert isinstance(responses, list)
-
-
-def test_catalogs_get_hsc_spectra(patch_post):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        result = Catalogs.get_hsc_spectra()
-        assert isinstance(result, Table)
-
-
-def test_catalogs_download_hsc_spectra(patch_post, tmpdir):
-    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
-        allSpectra = Catalogs.get_hsc_spectra()
-
-        # actually download the products
-        result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
-        assert isinstance(result, Table)
-
-        # just get the curl script
-        result = Catalogs.download_hsc_spectra(allSpectra[20:24],
-                                            download_dir=str(tmpdir), curl_flag=True)
-        assert isinstance(result, Table)
 
 
 def test_catalogs_verify_collection(patch_tap):
@@ -1683,24 +1664,28 @@ def test_catalogs_parse_legacy_pagination(patch_tap):
 
 def test_catalogs_create_adql_region(patch_tap):
     # string regions
-    Catalogs._create_adql_region(
+    adql_region = Catalogs._create_adql_region(
         region="Circle 202.4656816 +47.1999842 0.2"
     )
+    assert adql_region == "CIRCLE('ICRS',202.4656816,+47.1999842,0.2)"
 
-    Catalogs._create_adql_region(
+    adql_region = Catalogs._create_adql_region(
         region="Polygon ICRS 202.4656816 +47.1999842 202.5656816 +47.2999842 202.3656816 +47.0999842"
     )
+    assert adql_region == "POLYGON('ICRS',202.4656816,+47.1999842,202.5656816,+47.2999842,202.3656816,+47.0999842)"
 
-    Catalogs._create_adql_region(
+    adql_region = Catalogs._create_adql_region(
         region="Polygon 202.4656816 +47.1999842 202.5656816 +47.2999842 202.3656816 +47.0999842"
     )
+    assert adql_region == "POLYGON('ICRS',202.4656816,+47.1999842,202.5656816,+47.2999842,202.3656816,+47.0999842)"
 
     # astropy region objects
     cone_region = CircleSkyRegion(
         center=SkyCoord(10.8, 6.5, unit="deg"),
         radius=Angle(0.5, unit="deg")
     )
-    Catalogs._create_adql_region(region=cone_region)
+    adql_region = Catalogs._create_adql_region(region=cone_region)
+    assert adql_region == "CIRCLE('ICRS',10.8,6.5,0.5)"
 
     polygon_region = PolygonSkyRegion(
         SkyCoord(
@@ -1710,10 +1695,11 @@ def test_catalogs_create_adql_region(patch_tap):
             unit="deg",
         )
     )
-    Catalogs._create_adql_region(region=polygon_region)
+    adql_region= Catalogs._create_adql_region(region=polygon_region)
+    assert adql_region == "POLYGON('ICRS',57.376,24.053,56.391,24.622,56.025,24.049,56.616,24.291)"
 
     # iterable coord pairs
-    Catalogs._create_adql_region(
+    adql_region = Catalogs._create_adql_region(
         region=[
             (57.376, 24.053),
             (56.391, 24.622),
@@ -1721,6 +1707,7 @@ def test_catalogs_create_adql_region(patch_tap):
             (56.616, 24.291)
         ]
     )
+    assert adql_region == "POLYGON('ICRS',57.376,24.053,56.391,24.622,56.025,24.049,56.616,24.291)"
 
 
 def test_catalogs_invalid_create_adql_region(patch_tap):
@@ -1795,6 +1782,22 @@ def test_catalogs_parse_temporal_expression(patch_tap):
     # handling microseconds
     predicate = Catalogs._parse_temporal_expr("datetime", ">=2020-06-01 10:00:00.0001")
     assert predicate == "datetime >= '2020-06-01 10:00:00'"
+
+    # handling year-only str
+    predicate = Catalogs._parse_temporal_expr("time", "2025")
+    assert predicate == "time = '2025'"
+
+    # handling date str
+    predicate = Catalogs._parse_temporal_expr("time", "2020-08-01")
+    assert predicate == "time BETWEEN '2020-08-01 00:00:00' AND '2020-08-01 00:00:01'"
+
+    # handling astropy Time
+    predicate = Catalogs._parse_temporal_expr("obs_time", Time('2000-01-01 12:30:00'))
+    assert predicate == "obs_time BETWEEN '2000-01-01 12:30:00' AND '2000-01-01 12:30:01'"
+
+    # handling datetime
+    predicate = Catalogs._parse_temporal_expr("obs_time", datetime(2024, 6, 1, 8, 0, 1))
+    assert predicate == "obs_time BETWEEN '2024-06-01 08:00:01' AND '2024-06-01 08:00:02'"
 
 
 def test_catalogs_format_scalar_predicate(patch_tap):
@@ -2027,7 +2030,7 @@ def test_catalogs_format_criteria_conditions(patch_tap):
 def test_catalogs_invalid_tap_query(patch_tap):
     # This will trigger a DALQueryError in the mock TAP service
     # when 'invalid' is found in the query string
-    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+    with pytest.raises(InvalidQueryError, match="Simulated TAP query error"):
         Catalogs.query_criteria(
             collection="tic",
             coordinates=regionCoords,
@@ -2035,7 +2038,7 @@ def test_catalogs_invalid_tap_query(patch_tap):
             allwise='invalid'
         )
 
-    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+    with pytest.raises(InvalidQueryError, match="Simulated TAP query error"):
         Catalogs.query_region(
             regionCoords,
             radius=0.002 * u.deg,
@@ -2043,7 +2046,7 @@ def test_catalogs_invalid_tap_query(patch_tap):
             allwise='invalid'
         )
 
-    with pytest.raises(InvalidQueryError, match="TAP query failed for collection 'tic'"):
+    with pytest.raises(InvalidQueryError, match="Simulated TAP query error"):
         Catalogs.query_object(
             "M10",
             radius=.001,
@@ -2061,6 +2064,54 @@ def test_catalogs_invalid_spatial_query(patch_tap):
             coordinates=regionCoords,
             radius=0.002 * u.deg,
         )
+
+
+def test_catalogs_query_hsc_matchid_async(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.query_hsc_matchid_async(82371983)
+        assert isinstance(responses, list)
+
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.query_hsc_matchid_async(82371983, version=2)
+        assert isinstance(responses, list)
+
+    with pytest.warns((AstropyDeprecationWarning, InputWarning)) as record:
+        Catalogs.query_hsc_matchid_async(82371983, version=5)
+        messages = [str(w.message) for w in record]
+        assert any("This function is deprecated" in m for m in messages)
+        assert any("Invalid HSC version number" in m for m in messages)
+
+
+def test_catalogs_query_hsc_matchid(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        result = Catalogs.query_hsc_matchid(82371983)
+        assert isinstance(result, Table)
+
+
+def test_catalogs_get_hsc_spectra_async(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        responses = Catalogs.get_hsc_spectra_async()
+        assert isinstance(responses, list)
+
+
+def test_catalogs_get_hsc_spectra(patch_post):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        result = Catalogs.get_hsc_spectra()
+        assert isinstance(result, Table)
+
+
+def test_catalogs_download_hsc_spectra(patch_post, tmpdir):
+    with pytest.warns(AstropyDeprecationWarning, match="This function is deprecated"):
+        allSpectra = Catalogs.get_hsc_spectra()
+
+        # actually download the products
+        result = Catalogs.download_hsc_spectra(allSpectra[10], download_dir=str(tmpdir))
+        assert isinstance(result, Table)
+
+        # just get the curl script
+        result = Catalogs.download_hsc_spectra(allSpectra[20:24],
+                                            download_dir=str(tmpdir), curl_flag=True)
+        assert isinstance(result, Table)
 
 
 ###########################
@@ -2149,8 +2200,7 @@ def test_catalog_collection_run_tap_query(patch_tap):
     assert isinstance(result, Table)
     assert len(result) > 0
 
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
+    query = get_patch_tap_query(patch_tap)
     assert adql_str in query
 
 
@@ -2165,8 +2215,7 @@ def test_catalog_collection_grouped_fetch_catalogs(patch_tap):
     name = "roman_catalogs"
     cc = CatalogCollection(name)
     _ = cc._fetch_catalogs()
-    args, _ = patch_tap.run_sync.call_args
-    query = args[0]
+    query = get_patch_tap_query(patch_tap)
     assert f"WHERE table_name LIKE '{name}" in query
 
 

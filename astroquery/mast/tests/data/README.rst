@@ -70,7 +70,7 @@ To generate `~astroquery.mast.tests.data.tap_collections.json`, use the followin
     >>> import json
     >>> from astroquery.mast import utils
     ...
-    >>> resp = utils._simple_request('https://masttest.stsci.edu/vo-tap/api/v0.1/openapi.json')
+    >>> resp = utils._simple_request('https://mast.stsci.edu/vo-tap/api/v0.1/openapi.json')
     ...
     >>> with open('tap_collections.json', 'w') as file:
     ...     json.dump(resp.json(), file, indent=4)  # doctest: +SKIP
