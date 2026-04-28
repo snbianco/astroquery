@@ -21,7 +21,6 @@ from astropy.utils.exceptions import AstropyDeprecationWarning
 from pyvo.dal import TAPResults
 from pyvo.dal.exceptions import DALQueryError
 from pyvo.io.vosi import parse_capabilities
-from regions import CirclePixelRegion, CircleSkyRegion, PixCoord, PolygonSkyRegion
 from requests import HTTPError, Response
 
 from astroquery.exceptions import (
@@ -35,6 +34,7 @@ from astroquery.exceptions import (
     ResolverError,
 )
 from astroquery.mast import (
+    CatalogCollection,
     Catalogs,
     Mast,
     MastMissions,
@@ -51,7 +51,7 @@ from astroquery.mast import (
 from astroquery.mast.cloud import CloudAccess
 from astroquery.utils.mocks import MockResponse
 
-from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
+from ..catalog_collection import DEFAULT_CATALOGS, CatalogMetadata
 
 try:
     # Optional dependency import for cloud access functionality
@@ -64,6 +64,13 @@ try:
     import asdf
 except ImportError:
     pass
+
+try:
+    # Optional dependency import for region handling in collections queries
+    from regions import CirclePixelRegion, CircleSkyRegion, PixCoord, PolygonSkyRegion
+    HAS_REGIONS = True
+except ImportError:
+    HAS_REGIONS = False
 
 DATA_FILES = {'Mast.Caom.Cone': 'caom.json',
               'Mast.Name.Lookup': 'resolver.json',
@@ -317,7 +324,7 @@ def vo_tap_mock():
             # Queries to get column metadata
             filename = data_path(DATA_FILES['tap_columns'])
         elif 'WHERE' in query:
-            # Queries with results, keep in mind this is not meaninful and results won't match the query
+            # Queries with results, keep in mind this is not meaningful and results won't match the query
             filename = data_path(DATA_FILES['tap_results'])
         votable = parse(filename)
 
@@ -1923,25 +1930,6 @@ def test_catalogs_create_adql_region(patch_tap):
     )
     assert adql_region == "POLYGON('ICRS',202.4656816,+47.1999842,202.5656816,+47.2999842,202.3656816,+47.0999842)"
 
-    # Astropy region objects
-    cone_region = CircleSkyRegion(
-        center=SkyCoord(10.8, 6.5, unit="deg"),
-        radius=Angle(0.5, unit="deg")
-    )
-    adql_region = Catalogs._create_adql_region(region=cone_region)
-    assert adql_region == "CIRCLE('ICRS',10.8,6.5,0.5)"
-
-    polygon_region = PolygonSkyRegion(
-        SkyCoord(
-            [57.376, 56.391, 56.025, 56.616],
-            [24.053, 24.622, 24.049, 24.291],
-            frame="icrs",
-            unit="deg",
-        )
-    )
-    adql_region = Catalogs._create_adql_region(region=polygon_region)
-    assert adql_region == "POLYGON('ICRS',57.376,24.053,56.391,24.622,56.025,24.049,56.616,24.291)"
-
     # Iterable coord pairs
     adql_region = Catalogs._create_adql_region(
         region=[
@@ -1952,6 +1940,26 @@ def test_catalogs_create_adql_region(patch_tap):
         ]
     )
     assert adql_region == "POLYGON('ICRS',57.376,24.053,56.391,24.622,56.025,24.049,56.616,24.291)"
+
+    if HAS_REGIONS:
+        # Astropy region objects
+        cone_region = CircleSkyRegion(
+            center=SkyCoord(10.8, 6.5, unit="deg"),
+            radius=Angle(0.5, unit="deg")
+        )
+        adql_region = Catalogs._create_adql_region(region=cone_region)
+        assert adql_region == "CIRCLE('ICRS',10.8,6.5,0.5)"
+
+        polygon_region = PolygonSkyRegion(
+            SkyCoord(
+                [57.376, 56.391, 56.025, 56.616],
+                [24.053, 24.622, 24.049, 24.291],
+                frame="icrs",
+                unit="deg",
+            )
+        )
+        adql_region = Catalogs._create_adql_region(region=polygon_region)
+        assert adql_region == "POLYGON('ICRS',57.376,24.053,56.391,24.622,56.025,24.049,56.616,24.291)"
 
 
 def test_catalogs_invalid_create_adql_region(patch_tap):
@@ -1981,11 +1989,12 @@ def test_catalogs_invalid_create_adql_region(patch_tap):
             region=[57.376, 24.053, 56.391, 24.622, 56.025, 24.049, 56.616, 24.291]
         )
 
-    # Invalid astropy region
-    with pytest.raises(TypeError, match="Unsupported region type"):
-        Catalogs._create_adql_region(
-            region=CirclePixelRegion(PixCoord(x=42, y=43), 4.2)
-        )
+    if HAS_REGIONS:
+        # Invalid astropy region
+        with pytest.raises(TypeError, match="Unsupported region type"):
+            Catalogs._create_adql_region(
+                region=CirclePixelRegion(PixCoord(x=42, y=43), 4.2)
+            )
 
 
 def test_catalogs_parse_numeric_expression(patch_tap):
