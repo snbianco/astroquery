@@ -14,10 +14,10 @@ from astropy.table import Table, unique
 from astropy.time import Time
 from requests.models import Response
 
-from astroquery.mast import (Catalogs, Hapcut, Mast, MastMissions, Observations, Tesscut, Zcut, utils)
+from astroquery.mast import (Catalogs, CatalogCollection, Hapcut, Mast, MastMissions, Observations, Tesscut, Zcut, utils)
 
 from ...exceptions import (InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning)
-from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
+from ..catalog_collection import DEFAULT_CATALOGS, CatalogMetadata
 from ..utils import ResolverError
 
 try:
@@ -1200,11 +1200,12 @@ class TestMast:
         assert not any(result["known_binary"])
         assert all(np.isin(result["sp_class"], ["O", "B"]))
         assert all(
-            (result["gaia_parallax"] < -0.01) | (result["gaia_parallax"] >= 0) | (result["gaia_parallax"] >= -0.3)
+            ((result["gaia_parallax"] < -0.01) | (result["gaia_parallax"] >= 0))
+            & ~(result["gaia_parallax"] < -0.3)
         )
         assert all((result["star_teff"] >= 30000) & (result["star_teff"] <= 50000))
         assert all(result["coordinate_epoch"] == 2016)
-        assert all(np.isin(result["spectral_type_ref"], [51, 18, 59, 1]))
+        assert all(np.isin(result["spectral_type_ref"], [51, 18, 59]))
         assert all(c in result.colnames for c in select_cols)
 
         # Test offset
