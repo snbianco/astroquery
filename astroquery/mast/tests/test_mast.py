@@ -34,7 +34,6 @@ from astroquery.exceptions import (
     ResolverError,
 )
 from astroquery.mast import (
-    CatalogCollection,
     Catalogs,
     Mast,
     MastMissions,
@@ -51,7 +50,7 @@ from astroquery.mast import (
 from astroquery.mast.cloud import CloudAccess
 from astroquery.utils.mocks import MockResponse
 
-from ..catalog_collection import DEFAULT_CATALOGS, CatalogMetadata
+from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
 
 try:
     # Optional dependency import for cloud access functionality
