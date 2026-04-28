@@ -4,14 +4,35 @@
 New Tools and Services
 ----------------------
 
+esa.plato
+^^^^^^^^^
+- New module to access the ESA PLATO Science Archive. [#3573]
+
 noirlab
 ^^^^^^^
 
 - Restore access to the `NSF NOIRLab <https://noirlab.edu>`_
   `Astro Data Archive <https://astroarchive.noirlab.edu>`_ [#3359].
 
+esa.emds
+^^^^^^^^
+
+- New module to access the ESA ESDC Multi-Mission Data Services (EMDS). [#3511]
+
+esa.emds.einsteinprobe
+^^^^^^^^^^^^^^^^^^^^^^
+
+- New module to access the ESA Einstein Probe Science Archive. [#3511]
+
+
+
 API changes
 -----------
+
+esa.utils
+^^^^^^^^^^
+
+- Class EsaTap created as abstract class to extend all ESA modules based on PyVO. [#3511]
 
 esa.euclid
 ^^^^^^^^^^
@@ -33,10 +54,12 @@ esa.euclid
 - The method ``get_spectrum`` accepts the new parameter ``linking_parameter`` to retrieve the spectra by source_id and
   sourcepatch_id. [#3543]
 -  The ``source_id`` kwarg in the ``get_spectrum`` method has been renamed to ``ids``. [#3543]
-- Method ``get_cutout`` has deprecated the 'instrument' and 'id' parameters, providing them has no effect any more. 
+- Method ``get_cutout`` has deprecated the 'instrument' and 'id' parameters, providing them has no effect any more.
   The method now only supports retrieval of MER (background‑subtracted) image cutouts. [#3559]
-- The ``get_product_list`` method now also returns file_name_list column when the product type belongs to 
+- The ``get_product_list`` method now also returns file_name_list column when the product type belongs to
   BASIC_DOWNLOAD_DATA_PRODUCTS. [#3562]
+- The method ``get_spectrum`` accepts a single source_id or designation or multiple values separated by commas or a
+   list. [#3570]
 
 
 vizier
@@ -51,7 +74,7 @@ mast
   now check all requested products against cloud storage. As a result, setting ``cloud_only=True`` will skip
   any products that are not available in the cloud, rather than falling back to on-prem downloads.
 - The ``objectname`` keyword is deprecated in ``MastMissions`` in favor of ``object_names``. [#3540]
-- The ``objectname`` parameter in ``Catalogs``, ``Observations``, ``Tesscut``, and ``utils`` is deprecated 
+- The ``objectname`` parameter in ``Catalogs``, ``Observations``, ``Tesscut``, and ``utils`` is deprecated
   in favor of ``object_name``. [#3567]
 
 vo_conesearch
@@ -121,6 +144,10 @@ mast
 - ``MastMissions`` query functions now support single or multiple targets via ``coordinates`` and
   ``object_names`` (including combined use in ``query_criteria``). [#3540]
 
+- The cloud dataset in ``Observations`` is now enabled by default if the ``boto3`` and ``botocore`` packages are installed. This
+  default can be overridden by setting the ``enable_cloud_dataset`` configuration option to False. [#3534]
+
+
 jplspec
 ^^^^^^^
 
@@ -172,6 +199,7 @@ Infrastructure, Utility and Other Changes and Additions
 - ``BaseVOQuery`` now accepts a ``extra_user_agents`` parameter to allow the addition
   of user agents on top of astroquery's ones [#3526]
 
+- Fix no expiration case for ``cache_timeout`` config option. [#3579]
 
 utils.tap
 ^^^^^^^^^
