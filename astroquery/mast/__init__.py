@@ -14,22 +14,10 @@ class Conf(_config.ConfigNamespace):
     Configuration parameters for `astroquery.mast`.
     """
 
-    server = _config.ConfigItem(
-        'https://mast.stsci.edu',
-        'Name of the MAST server.')
-    ssoserver = _config.ConfigItem(
-        'https://ssoportal.stsci.edu',
-        'MAST SSO Portal server.')
-    timeout = _config.ConfigItem(
-        600,
-        'Time limit for requests from the STScI server.')
-    pagesize = _config.ConfigItem(
-        50000,
-        'Number of results to request at once from the STScI server.')
-    enable_cloud_dataset = _config.ConfigItem(
-        True,
-        'Enable access to cloud-hosted datasets (e.g. on AWS S3) by default. '
-        'Requires the ``boto3`` and ``botocore`` packages to be installed.')
+    server = _config.ConfigItem("https://masttest.stsci.edu", "Name of the MAST server.")
+    ssoserver = _config.ConfigItem("https://ssoportal.stsci.edu", "MAST SSO Portal server.")
+    timeout = _config.ConfigItem(600, "Time limit for requests from the STScI server.")
+    pagesize = _config.ConfigItem(50000, "Number of results to request at once from the STScI server.")
 
 
 conf = Conf()

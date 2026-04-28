@@ -8,7 +8,3 @@ European Space Astronomy Centre (ESAC)
 European Space Agency (ESA)
 
 """
-
-from .utils import EsaTap, download_file
-
-__all__ = ['EsaTap', 'download_file']
