@@ -35,7 +35,6 @@ from astroquery.exceptions import (
     LargeQueryWarning,
 )
 from astroquery.mast import (
-    CatalogCollection,
     Catalogs,
     Mast,
     MastMissions,
@@ -53,7 +52,7 @@ from astroquery.mast.cloud import CloudAccess
 from astroquery.mast.cutouts import _parse_cutout_size
 from astroquery.utils.mocks import MockResponse
 
-from ..catalog_collection import DEFAULT_CATALOGS, CatalogMetadata
+from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
 
 try:
     # Optional dependency import for cloud access functionality

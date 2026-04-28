@@ -14,10 +14,10 @@ from astropy.table import Table, unique
 from astropy.time import Time
 from requests.models import Response
 
-from astroquery.mast import (Catalogs, CatalogCollection, Hapcut, Mast, MastMissions, Observations, Tesscut, Zcut, utils)
+from astroquery.mast import (Catalogs, Hapcut, Mast, MastMissions, Observations, Tesscut, Zcut, utils)
 
 from ...exceptions import (InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning)
-from ..catalog_collection import DEFAULT_CATALOGS, CatalogMetadata
+from ..catalog_collection import DEFAULT_CATALOGS, CatalogCollection, CatalogMetadata
 from ..utils import ResolverError
 
 try:
