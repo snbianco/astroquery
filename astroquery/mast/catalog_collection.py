@@ -75,7 +75,11 @@ class CatalogCollection:
         response.raise_for_status()
         data = response.json()
 
-        collection_enum = data["components"]["schemas"]["CatalogName"]["enum"]
+        try:
+            collection_enum = data["components"]["schemas"]["CatalogName"]["enum"]
+        except KeyError:
+            raise RuntimeError("Failed to discover collections from TAP service: Unexpected response format")
+
         collection_parent_map = {}
 
         # Discover collections stored under grouped TAP collections
@@ -122,11 +126,18 @@ class CatalogCollection:
         collection_name : str
             The user-facing collection name to get the parent collection for.
         """
+        if not isinstance(collection_name, str):
+            raise InvalidQueryError(f"Collection name must be a string, got {type(collection_name)}")
+
         if cls._collection_parent_map is None:
             cls.discover_collections()
 
         normalized_name = collection_name.lower().strip()
-        parent_collection = cls._collection_parent_map.get(normalized_name, normalized_name)
+        parent_collection = cls._collection_parent_map.get(normalized_name)
+
+        if parent_collection is None:
+            raise InvalidQueryError(f"Collection '{collection_name}' not found")
+
         return parent_collection
 
     def __init__(self, collection):
@@ -138,6 +149,9 @@ class CatalogCollection:
         collection : str
             The name of the MAST catalog collection to interact with.
         """
+        if not isinstance(collection, str):
+            raise ValueError(f"Collection name must be a string, got {type(collection)}")
+
         self.name = collection.strip().lower()
         self._parent_collection = None
         self._tap_service = None
@@ -153,6 +167,10 @@ class CatalogCollection:
 
         # Cache for catalog metadata to avoid redundant queries
         self._catalog_metadata_cache: Dict[str, CatalogMetadata] = dict()
+
+        # Cache the catalog lookup mapping for validating catalog names in queries
+        self._catalog_lookup = None
+        self._no_prefix_lookup = None
 
     @property
     def parent_collection(self):
@@ -320,7 +338,7 @@ class CatalogCollection:
             A list of supported ADQL functions.
         """
         adql_functions = ["CIRCLE", "POLYGON", "POINT", "CONTAINS", "INTERSECTS"]
-        supported = []
+        supported = set()
         feature_id = "ivo://ivoa.net/std/TAPRegExt#features-adqlgeo"
         for capability in self.tap_service.capabilities:
             if capability.standardid != "ivo://ivoa.net/std/TAP":
@@ -332,7 +350,7 @@ class CatalogCollection:
 
                 for func in adql_functions:
                     if lang.get_feature(feature_id, func):
-                        supported.append(func)
+                        supported.add(func)
 
         return supported
 
@@ -356,24 +374,32 @@ class CatalogCollection:
         InvalidQueryError
             If the specified catalog is not valid for the given collection.
         """
-        catalog = catalog.lower()
+        catalog = catalog.lower().strip()
 
-        # Build a mapping for case-insensitive and no-prefix lookup
-        lookup = {}
-        no_prefix_map = {}
-        for cat in self.catalog_names:
-            cat_lower = cat.lower()
-            lookup[cat_lower] = cat  # case-insensitive match
-            no_prefix = cat_lower.split(".")[-1]
-            if no_prefix not in no_prefix_map:
-                no_prefix_map[no_prefix] = [cat]  # no-prefix match (first occurrence)
-            else:
-                no_prefix_map[no_prefix].append(cat)
+        if self._catalog_lookup is not None and self._no_prefix_lookup is not None:
+            lookup = self._catalog_lookup
+            no_prefix_map = self._no_prefix_lookup
+        else:
+            # Build a mapping for case-insensitive and no-prefix lookup
+            lookup = {}
+            no_prefix_map = {}
+            for cat in self.catalog_names:
+                cat_lower = cat.lower()
+                lookup[cat_lower] = cat  # case-insensitive match
+                no_prefix = cat_lower.split(".")[-1]
+                if no_prefix not in no_prefix_map:
+                    no_prefix_map[no_prefix] = [cat]  # no-prefix match (first occurrence)
+                else:
+                    no_prefix_map[no_prefix].append(cat)
 
-        # Add unambiguous no-prefix matches to lookup
-        for no_prefix, cats in no_prefix_map.items():
-            if len(cats) == 1:
-                lookup[no_prefix] = cats[0]
+            # Add unambiguous no-prefix matches to lookup
+            for no_prefix, cats in no_prefix_map.items():
+                if len(cats) == 1:
+                    lookup[no_prefix] = cats[0]
+
+            # Cache the lookup maps for future calls
+            self._catalog_lookup = lookup
+            self._no_prefix_lookup = no_prefix_map
 
         # Direct or unambiguous no-prefix match
         if catalog in lookup:
@@ -427,8 +453,7 @@ class CatalogCollection:
         if len(result) == 0:
             raise InvalidQueryError(f"Catalog '{catalog}' not found in collection '{self.name}'.")
 
-        column_metadata = result.to_table()
-        return column_metadata
+        return result.to_table()
 
     def _get_ra_dec_column_names(self, column_metadata):
         """
@@ -448,11 +473,11 @@ class CatalogCollection:
         ra_col = None
         dec_col = None
         for name, ucd in zip(column_metadata["column_name"], column_metadata["ucd"]):
-            if ucd and "pos.eq.ra;meta.main" in ucd:
+            if ucd and "pos.eq.ra;meta.main" in ucd.lower():
                 # TODO: ps1_dr2.mean_object and ps1_dr2.stacked_object has a column that can be used,
                 # but is not labeled with "meta.main"
                 ra_col = name
-            elif ucd and "pos.eq.dec;meta.main" in ucd:
+            elif ucd and "pos.eq.dec;meta.main" in ucd.lower():
                 dec_col = name
         return ra_col, dec_col
 
@@ -479,7 +504,7 @@ class CatalogCollection:
         col_name_lookup = {col.lower(): col for col in col_names}
 
         # Check each criteria argument for validity
-        for kwd in criteria.keys():
+        for kwd in criteria:
             if kwd.lower() not in col_name_lookup:
                 # Suggest closest match for invalid keyword
                 closest = difflib.get_close_matches(kwd.lower(), list(col_name_lookup.keys()), n=1)

@@ -224,7 +224,7 @@ class CatalogsClass(MastQueryWithLogin):
         select_cols=None,
         sort_by=None,
         sort_desc=False,
-        filters={},
+        filters=None,
         version=None,
         pagesize=None,
         page=None,
@@ -356,7 +356,7 @@ class CatalogsClass(MastQueryWithLogin):
                 adql_region = self._create_adql_region(region)
             if object_name or coordinates:  # Cone search
                 coordinates = utils.parse_input_location(
-                    coordinates=coordinates, objectname=object_name, resolver=resolver
+                    coordinates=coordinates, object_name=object_name, resolver=resolver
                 )
                 radius = coord.Angle(radius, u.deg)  # If radius is just a number we assume degrees
                 adql_region = f"CIRCLE('ICRS', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})"
@@ -456,7 +456,7 @@ class CatalogsClass(MastQueryWithLogin):
         select_cols=None,
         sort_by=None,
         sort_desc=False,
-        filters={},
+        filters=None,
         version=None,
         pagesize=None,
         page=None,
@@ -589,7 +589,7 @@ class CatalogsClass(MastQueryWithLogin):
         select_cols=None,
         sort_by=None,
         sort_desc=False,
-        filters={},
+        filters=None,
         version=None,
         pagesize=None,
         page=None,
@@ -1517,28 +1517,6 @@ class CatalogsClass(MastQueryWithLogin):
             pos_builder=lambda c, vals: [self._parse_temporal_expr(c, v) for v in vals],
             neg_builder=lambda c, v: self._format_scalar_predicate(c, f"!{v}", is_temporal=True),
         )
-
-    def _build_temporal_list_predicate(self, col, pos_items, neg_items):
-        """
-        Build temporal list predicates using column datatype to choose CAST vs string comparison.
-
-        Parameters
-        ----------
-        col : str
-            The column name.
-        pos_items : list
-            List of positive values.
-        neg_items : list
-            List of negative values.
-
-        Returns
-        -------
-        str
-            The ADQL predicate for the temporal list.
-        """
-        pos_parts = [self._parse_temporal_expr(col, v) for v in pos_items]
-        neg_parts = [self._format_scalar_predicate(col, f"!{v}", temporal_cols={col}) for v in neg_items]
-        return self._combine_predicates(pos_parts, neg_parts)
 
     def _format_criteria_conditions(self, collection_obj, catalog, criteria):
         """
