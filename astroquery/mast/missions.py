@@ -542,7 +542,7 @@ class MastMissionsClass(MastQueryWithLogin):
             base_url = self._service_api_connection.MAST_DOWNLOAD_URL
             keyword = 'uri'
             # These files require a MAST URI and not just a filename
-            if not uri.startswith('mast:'):
+            if not uri.startswith('mast'):
                 raise InvalidQueryError(f'For mission "{mission}", a full MAST URI is required '
                                         f'for downloading. Got "{uri}".')
 
