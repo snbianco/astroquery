@@ -318,8 +318,6 @@ def zcut_download_mockreturn(url, file_path):
 def vo_tap_mock():
     """Helper function to create a mock TAPService with predefined responses based on the input query."""
     def run_sync_mock(query, **kwargs):
-        print(query)
-        print(kwargs)
         """Mock function to simulate TAPService run_sync and run_async methods."""
         if 'invalid' in query:
             # Use this when wanting to simulate a DALQueryError
