@@ -232,6 +232,8 @@ mast
 - Added ``pass_id`` as an alias for the ``pass`` column in query functions for the Roman mission to avoid conflicts with
   the reserved Python keyword. [#3588]
 - Update the cutout format request parameter in ``Zcut.download_cutouts`` to reflect a recent service change. [#3608]
+- Added the ``MastMissions.read_product`` method to read data products directly into memory as an `~astropy.io.fits.HDUList`
+  or an `~asdf.AsdfFile` object. [#3593]
 - Added a ``mission`` parameter to methods in ``MastMissions`` to allow overriding the default mission for a query. [#3618]
 - The ``MastMissions.get_available_missions`` method retrieves the list of available missions and caches it for future use. [#3618]
 - Add a ``count_only`` parameter to ``MastMissions`` query methods to return only the number of matching results,
