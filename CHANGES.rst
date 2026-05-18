@@ -181,6 +181,8 @@ mast
 - Added the ``MastMissions.read_product`` method to read data products directly into memory as an `~astropy.io.fits.HDUList`
   or an `~asdf.AsdfFile` object. [#3593]
 - Update the cutout format request parameter in ``Zcut.download_cutouts`` to reflect a recent service change. [#3608]
+- Added the ``MastMissions.read_product`` method to read data products directly into memory as an `~astropy.io.fits.HDUList`
+  or an `~asdf.AsdfFile` object. [#3593]
 - Added a ``mission`` parameter to methods in ``MastMissions`` to allow overriding the default mission for a query. [#3618]
 - The ``MastMissions.get_available_missions`` method retrieves the list of available missions and caches it for future use. [#3618]
 
