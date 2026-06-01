@@ -1,0 +1,21 @@
+name: Notify Slack on mast-beta-release push
+
+on:
+  push:
+    branches:
+      - mast-beta-release
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"text\": \":warning: A push was made to *mast-beta-release* by *${{ github.actor }}*.\n\nPlease verify that the MAST beta release documentation and feature table are up to date.\n\nCommit: ${{ github.event.head_commit.message }}\nhttps://github.com/${{ github.repository }}/commit/${{ github.sha }}\"
+          }" \
+          "$SLACK_WEBHOOK_URL"
