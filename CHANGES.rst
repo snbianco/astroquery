@@ -24,6 +24,12 @@ esa.emds.einsteinprobe
 
 - New module to access the ESA Einstein Probe Science Archive. [#3511]
 
+mast
+^^^^
+
+- Updated ``Catalogs`` interface for MAST TAP catalogs, including collection/catalog discovery helpers and a unified query workflow across
+  positional and non-positional searches. [#3582]
+
 
 
 API changes
@@ -76,6 +82,19 @@ mast
 - The ``objectname`` keyword is deprecated in ``MastMissions`` in favor of ``object_names``. [#3540]
 - The ``objectname`` parameter in ``Catalogs``, ``Observations``, ``Tesscut``, and ``utils`` is deprecated
   in favor of ``object_name``. [#3567]
+- ``Catalogs`` has been refactored around VO-TAP queries. The new workflow uses ``collection`` + ``catalog`` (instead of HSC/PanSTARRS-specific
+  assumptions), supports discovery helpers (``get_collections``, ``get_catalogs``, ``get_column_metadata``), and 
+  adds ``supports_spatial_queries`` to inspect positional-query support before querying. [#3582]
+- ``Catalogs.query_criteria`` now provides a unified query interface for positional and non-positional searches, with support for 
+  cone searches around coordinates or an object, STC-S regions via the ``region`` parameter, column selection, sorting, count-only queries, 
+  pagination via ``limit``/``offset``, and a ``filters`` dictionary for column names that conflict with method arguments. [#3582]
+- ``Catalogs.query_region`` and ``Catalogs.query_object`` now follow the same unified backend as ``query_criteria``, including support 
+  for ``collection``/``catalog``, ``limit``/``offset``, ``select_cols``, sorting, and advanced criteria filters. [#3582]
+- The legacy ``version``, ``pagesize``, and ``page`` parameters in ``Catalogs`` query methods are now deprecated in favor 
+  of ``collection``/``catalog`` and ``limit``/``offset``. [#3582]
+- Passing a collection name via ``Catalogs(..., catalog=...)`` is deprecated; use the ``collection`` parameter instead. [#3582]
+- ``Catalogs`` legacy HSC-only helper methods (``query_hsc_matchid[_async]``, ``get_hsc_spectra[_async]``, and
+  ``download_hsc_spectra``) are deprecated and will be removed in a future release. [#3582]
 
 vo_conesearch
 ^^^^^^^^^^^^^
@@ -96,6 +115,7 @@ svo_fps
 ^^^^^^^
 
 - Add ``get_filter_metadata`` to allow retrieval of filter metadata. [#3528]
+- Add ``get_zeropoint`` to allow retrieval of filter zeropoints and allow kwarg passing to ``get_filter_metadata``. [#3545]
 
 heasarc
 ^^^^^^^
@@ -118,6 +138,15 @@ esa.hubble
 
 - Update ``get_datalabs_path`` method so an alternative path is checked if the
   file is not in Datalabs yet [#3437]
+- Update ``get_datalabs_path`` method to check for files for new collections (HLSP and HSLA) [#3578]
+
+
+imcce
+^^^^^
+
+- Change the URL for SkyBot and Miriade Web Services [#3595]
+- Adapted the ``Miriade`` Class to the new outputs of the Web Service [#3595]
+
 
 mast
 ^^^^
@@ -143,9 +172,12 @@ mast
   improvements to cloud download handling. [#3488]
 - ``MastMissions`` query functions now support single or multiple targets via ``coordinates`` and
   ``object_names`` (including combined use in ``query_criteria``). [#3540]
-
 - The cloud dataset in ``Observations`` is now enabled by default if the ``boto3`` and ``botocore`` packages are installed. This
   default can be overridden by setting the ``enable_cloud_dataset`` configuration option to False. [#3534]
+- Results returned from ``MastMissions`` metadata query functions now include search parameters in the metadata of the ``astropy.table.Table`` object
+  and column descriptions in the column metadata. [#3588]
+- Added ``pass_id`` as an alias for the ``pass`` column in query functions for the Roman mission to avoid conflicts with 
+  the reserved Python keyword. [#3588]
 
 
 jplspec
@@ -164,6 +196,7 @@ mpc
 ^^^
 
 - Fix bug in queries for interstellar objects with ``MPC.get_observations`` and enable queries for "dead" comets [#3474]
+- Fix ``MPC.get_observations`` column parsing for very close objects, very high proper motions, and objects in the Earth's shadow [#3594]
 
 linelists
 ^^^^^^^^^
@@ -200,6 +233,8 @@ Infrastructure, Utility and Other Changes and Additions
   of user agents on top of astroquery's ones [#3526]
 
 - Fix no expiration case for ``cache_timeout`` config option. [#3579]
+
+- Workaround upstream bug when caching a response using pyvo. [#3586]
 
 utils.tap
 ^^^^^^^^^
