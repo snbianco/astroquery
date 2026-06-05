@@ -1039,6 +1039,120 @@ class ObservationsClass(MastQueryWithLogin):
 
         return manifest
 
+    def get_urls(self, products, *, mrp_only=False, cloud_only=False, include_bucket=True,
+                 full_url=False, verbose=True, **filters):
+        """
+        Get URLs for data products.
+        If cloud access is enabled, urls will be returned for the cloud.
+
+        Parameters
+        ----------
+        products : str, list, `~astropy.table.Table`
+            Either a single or list of obsids (as can be given to `get_product_list`),
+            or a Table of products (as is returned by `get_product_list`)
+        mrp_only : bool, optional
+            Default False. When set to true only "Minimum Recommended Products" will be returned.
+        cloud_only : bool, optional
+            Default False. If set to True and cloud data access is enabled (see `enable_cloud_dataset`)
+            files that are not found in the cloud will be skipped rather than returned in the list
+            as is the default behavior. If cloud access is not enabled this argument as no affect.
+        include_bucket : bool
+            Default True. When False, returns the path of the file relative to the
+            top level cloud storage location.
+            Must be set to False when using the full_url argument.
+        full_url : bool
+            Default False. Return an HTTP fetchable url instead of a cloud uri.
+            Must set include_bucket to False to use this option.
+        verbose : bool, optional
+            Default True. Whether to show download progress in the console.
+        **filters :
+            Filters to be applied.  Valid filters are all products fields returned by
+            ``get_metadata("products")`` and 'extension' which is the desired file extension.
+            The Column Name (or 'extension') is the keyword, with the argument being one or
+            more acceptable values for that parameter.
+            Filter behavior is AND between the filters and OR within a filter set.
+            For example: productType="SCIENCE",extension=["fits","jpg"]
+
+        Returns
+        -------
+        response : list[str]
+            URLs or cloud URIs associated with the requested products.
+        """
+        # Ensure cloud access is enabled
+        cloud_enabled = self._ensure_cloud_access()
+
+        # Check cloud_enabled for cloud_only queries
+        if cloud_only and not cloud_enabled:
+            warnings.warn("`cloud_only` is True but cloud data access is not enabled. "
+                          "Falling back to MAST urls.", InputWarning)
+
+        if full_url and include_bucket:
+            raise InvalidQueryError(
+                "`include_bucket` must be False when `full_url=True`."
+            )
+
+        # If the products list is a row we need to cast it as a table
+        if isinstance(products, Row):
+            products = Table(products, masked=True)
+
+        uri_list = None
+        # If the products list is not already a table of products we need to
+        # get the products and filter them appropriately
+        if not isinstance(products, Table):
+            if isinstance(products, str):
+                products = [products]
+
+            if all(str(item).startswith("mast:") for item in products):
+                uri_list = list(products)
+
+                if mrp_only or filters:
+                    warnings.warn(
+                        "Filtering is not supported when providing MAST URIs. "
+                        "To apply filters, provide a product table, row, or obsid.",
+                        InputWarning,
+                    )
+            else:
+                # collect list of products
+                product_lists = []
+                for oid in products:
+                    product_lists.append(self.get_product_list(oid))
+
+                products = vstack(product_lists)
+
+        if uri_list is None:
+            # apply filters
+            products = self.filter_products(products, mrp_only=mrp_only, **filters)
+
+            # remove duplicate products
+            products = utils.remove_duplicate_products(products, 'dataURI')
+            if not len(products):
+                warnings.warn("No products to return urls for.", NoResultsWarning)
+                return
+
+            # parse out the uris and get cloud uris if cloud enabled
+            uri_list = [url for url in products['dataURI']]
+
+        base_url = self._portal_api_connection.MAST_DOWNLOAD_URL
+        url_list = [f"{base_url}?uri={quote(uri, safe=':/')}" for uri in uri_list]
+
+        if cloud_enabled:
+            cloud_uris = self._cloud_connection.get_cloud_uri_list(
+                uri_list,
+                include_bucket=include_bucket,
+                full_url=full_url,
+                verbose=verbose
+            )
+
+            # remove None values if cloud only, otherwise zip the two lists
+            if cloud_only:
+                url_list = [uri for uri in cloud_uris if uri is not None]
+            else:
+                url_list = [cloud_uri if cloud_uri is not None
+                    else url for cloud_uri, url in zip(cloud_uris, url_list)
+                ]
+
+        return url_list
+
     def list_cloud_datasets(self):
         """
         Returns a list of datasets that support cloud data access. Datasets are the prefixes

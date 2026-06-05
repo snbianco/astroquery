@@ -1090,6 +1090,129 @@ class TestMast:
         uris = Observations.get_cloud_uris(products)
         assert len(uris) == 1
 
+    def test_observations_get_urls(self, msa_product_table):
+        # Explicity disable cloud dataset
+        Observations.disable_cloud_dataset()
+        test_obs_id = '25119363'
+
+        # handling string obsid
+        url_list = Observations.get_urls(test_obs_id)
+        assert isinstance(url_list, list)
+        for url in url_list:
+            assert isinstance(url, str)
+            assert "s3" not in url
+
+        # handling list obsid
+        url_list = Observations.get_urls([test_obs_id])
+        assert isinstance(url_list, list)
+        for url in url_list:
+            assert isinstance(url, str)
+            assert "s3" not in url
+
+        # handling row
+        url_list = Observations.get_urls(msa_product_table[0])
+        assert isinstance(url_list, list)
+
+        # handling table
+        url_list = Observations.get_urls(msa_product_table)
+        assert isinstance(url_list, list)
+
+        # checking inavlid param combo
+        with pytest.raises(InvalidQueryError, match = "`include_bucket` must be False"):
+            url_list = Observations.get_urls(
+                test_obs_id,
+                include_bucket=True,
+                full_url=True,
+            )
+
+        # checking inavlid param combo
+        with pytest.raises(InvalidQueryError, match = "`include_bucket` must be False"):
+            url_list = Observations.get_urls(
+                test_obs_id,
+                include_bucket=True,
+                full_url=True,
+            )
+
+    def test_observations_get_urls_no_duplicates(self, caplog, msa_product_table):
+        # ensure removal of duplicates
+        products = msa_product_table
+        assert len(products) == 6
+
+        url_list = Observations.get_urls(products)
+        assert len(url_list) == 1
+
+        # Check that an INFO message about duplicates was logged
+        with caplog.at_level("INFO", logger="astroquery"):
+            assert "products were duplicates" in caplog.text
+
+    def test_observations_get_urls_cloud(self, msa_product_table):
+        test_data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
+        expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
+
+        # Explicity enable cloud dataset
+        Observations.enable_cloud_dataset()
+
+        # Adding a product that's not in the cloud to test mixed downloads
+        in_uri = "mast:IUE/url/pub/vospectra/iue2/swp18830mxlo_vo.fits"
+        new_row = {col: msa_product_table[col][0] for col in msa_product_table.colnames}
+        new_row["dataURI"] = in_uri
+        new_row["productFilename"] = Path(in_uri).name
+        msa_product_table = msa_product_table.copy()
+        msa_product_table.add_row(new_row)
+
+        # URI input
+        url_list = Observations.get_urls(test_data_uri)
+        assert isinstance(url_list, list)
+        assert len(url_list) == 1
+        assert url_list[0] == expected
+
+        # URI list input
+        url_list = Observations.get_urls([test_data_uri])
+        assert isinstance(url_list, list)
+        assert len(url_list) == 1
+        assert url_list[0] == expected
+
+        # check invalid arg combo
+        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+            url_list = Observations.get_urls([test_data_uri], extension="png")
+        assert isinstance(url_list, list)
+        assert len(url_list) == 1
+        assert url_list[0] == expected
+
+        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+            url_list = Observations.get_urls([test_data_uri], mrp=True)
+        assert isinstance(url_list, list)
+        assert len(url_list) == 1
+        assert url_list[0] == expected
+
+        # second product (None) should have been stripped from list
+        with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+            result = Observations.get_urls(msa_product_table, cloud_only=True)
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+        # Should fall back and get mast url if cloud_only is False
+        with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+            result = Observations.get_urls(msa_product_table)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[1].startswith("http")
+
+        # confirm full urls
+        with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+            result = Observations.get_urls(msa_product_table, include_bucket=False, full_url=True)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(url.startswith("http") for url in result)
+
+        # disable cloud dataset
+        Observations.disable_cloud_dataset()
+        with pytest.warns(InputWarning, match="`cloud_only` is True but cloud data access"):
+            result = Observations.get_urls(msa_product_table, cloud_only=True)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(url.startswith("http") for url in result)
+
     ######################
     # CatalogClass tests #
     ######################
