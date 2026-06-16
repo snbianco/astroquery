@@ -1090,6 +1090,60 @@ class TestMast:
         uris = Observations.get_cloud_uris(products)
         assert len(uris) == 1
 
+    def test_observations_build_products_list(self, msa_product_table):
+        test_obs_id = '25119363'
+        test_data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
+
+        # Explicity enable cloud dataset
+        Observations.enable_cloud_dataset()
+
+        # handling string obsid
+        products, uri_list = Observations._build_products_list(test_obs_id)
+        assert isinstance(products, Table)
+        assert all(products["obsID"] == test_obs_id)
+        assert not uri_list
+
+        # handling list obsid
+        products, uri_list = Observations._build_products_list([test_obs_id])
+        assert isinstance(products, Table)
+        assert all(products["obsID"] == test_obs_id)
+        assert not uri_list
+
+        # handling row
+        products, uri_list = Observations._build_products_list(msa_product_table[0])
+        assert isinstance(products, Table)
+        assert all(products["obsID"] == msa_product_table[0]["obsID"])
+        assert not uri_list
+
+        # handling table
+        products, uri_list = Observations._build_products_list(msa_product_table)
+        assert isinstance(products, Table)
+        assert products["obsID"] in msa_product_table["obsID"]
+        assert not uri_list
+
+        # handling URI input
+        products, uri_list = Observations._build_products_list(test_data_uri)
+        assert isinstance(products, list) and isinstance(uri_list, list)
+        assert len(uri_list) == 1
+        assert products == uri_list
+
+        # handling URI list input
+        products, uri_list = Observations._build_products_list([test_data_uri])
+        assert isinstance(products, list) and isinstance(uri_list, list)
+        assert len(uri_list) == 1
+        assert products == uri_list
+
+        # check invalid arg combo
+        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+            products, uri_list = Observations._build_products_list([test_data_uri], extension="png")
+        assert isinstance(products, list) and isinstance(uri_list, list)
+        assert len(uri_list) == 1
+
+        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+            products, uri_list = Observations._build_products_list([test_data_uri], mrp=True)
+        assert isinstance(products, list) and isinstance(uri_list, list)
+        assert len(uri_list) == 1
+
     def test_observations_get_urls(self, msa_product_table):
         # Explicity disable cloud dataset
         Observations.disable_cloud_dataset()
@@ -1213,9 +1267,9 @@ class TestMast:
         assert len(result) == 2
         assert all(url.startswith("http") for url in result)
 
-    ######################
-    # CatalogClass tests #
-    ######################
+    #######################
+    # CatalogsClass tests #
+    #######################
 
     def test_catalogs_collection(self):
         # Default collection should be HSC

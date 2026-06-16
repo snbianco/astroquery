@@ -1607,6 +1607,62 @@ def test_observations_disable_cloud_dataset(patch_boto3):
     assert Observations._cloud_enabled_explicitly is False
 
 
+def test_observations_build_products_list(monkeypatch):
+    obsid = '2003738726'
+    data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
+
+    # checking invalid arg combos
+    with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        products, uri_list = Observations._build_products_list([data_uri], extension="png")
+    assert isinstance(products, list) and isinstance(uri_list, list)
+    assert len(uri_list) == 1
+
+    with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        products, uri_list = Observations._build_products_list([data_uri], mrp=True)
+    assert isinstance(products, list) and isinstance(uri_list, list)
+    assert len(uri_list) == 1
+
+    # obsid input
+    products, uri_list = Observations._build_products_list(obsid)
+    assert isinstance(products, Table)
+    assert all(products["obsID"] == obsid)
+    assert not uri_list
+
+    # list of obsid input
+    products, uri_list = Observations._build_products_list([obsid])
+    assert isinstance(products, Table)
+    assert all(products["obsID"] == obsid)
+    assert not uri_list
+
+    # row input
+    product = Table()
+    product['dataURI'] = [data_uri]
+    products, uri_list = Observations._build_products_list(product[0])
+    assert isinstance(products, Table)
+    assert all(product["dataURI"] == data_uri)
+    assert not uri_list
+
+    # table input
+    product = Table()
+    product['dataURI'] = [data_uri]
+    products, uri_list = Observations._build_products_list(product)
+    assert isinstance(products, Table)
+    assert all(products["dataURI"] == data_uri)
+    assert not uri_list
+
+    # URI input
+    products, uri_list = Observations._build_products_list(data_uri)
+    assert isinstance(uri_list, list)
+    assert len(uri_list) == 1
+    assert uri_list[0] == data_uri
+
+    # URI list input
+    products, uri_list = Observations._build_products_list([data_uri])
+    assert isinstance(uri_list, list)
+    assert len(uri_list) == 1
+    assert uri_list[0] == data_uri
+
+
 def test_observations_get_urls(monkeypatch):
     obsid = '2003738726'
     data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
@@ -1742,9 +1798,9 @@ def test_observations_get_urls_cloud_fallback(monkeypatch):
     assert result[0] == test_s3_uri
 
 
-######################
-# CatalogClass tests #
-######################
+#######################
+# CatalogsClass tests #
+#######################
 
 
 def test_catalogs_attributes(patch_tap):
