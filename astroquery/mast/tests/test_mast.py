@@ -1663,7 +1663,7 @@ def test_observations_build_products_list(monkeypatch):
     assert uri_list[0] == data_uri
 
 
-def test_observations_get_urls(monkeypatch):
+def test_observations_get_product_urls(monkeypatch):
     obsid = '2003738726'
     data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
     expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
@@ -1671,7 +1671,7 @@ def test_observations_get_urls(monkeypatch):
     # checking invalid arg combos
     with pytest.raises(InvalidQueryError,
                        match="`include_bucket` must be False"):
-        Observations.get_urls(
+        Observations.get_product_urls(
             obsid,
             include_bucket=True,
             full_url=True
@@ -1679,11 +1679,11 @@ def test_observations_get_urls(monkeypatch):
     # disable cloud
     Observations.disable_cloud_dataset()
     # obsid input
-    url_list = Observations.get_urls(obsid)
+    url_list = Observations.get_product_urls(obsid)
     assert isinstance(url_list, list)
 
     # list of obsid input
-    url_list = Observations.get_urls([obsid])
+    url_list = Observations.get_product_urls([obsid])
     assert isinstance(url_list, list)
 
     # reenable cloud
@@ -1692,7 +1692,7 @@ def test_observations_get_urls(monkeypatch):
     # row input
     product = Table()
     product['dataURI'] = [data_uri]
-    url_list = Observations.get_urls(product[0])
+    url_list = Observations.get_product_urls(product[0])
     assert isinstance(url_list, list)
     assert len(url_list) == 1
     assert url_list[0] == expected
@@ -1700,32 +1700,32 @@ def test_observations_get_urls(monkeypatch):
     # table input
     product = Table()
     product['dataURI'] = [data_uri]
-    url_list = Observations.get_urls(product)
+    url_list = Observations.get_product_urls(product)
     assert isinstance(url_list, list)
     assert len(url_list) == 1
     assert url_list[0] == expected
 
     # URI input
-    url_list = Observations.get_urls(data_uri)
+    url_list = Observations.get_product_urls(data_uri)
     assert isinstance(url_list, list)
     assert len(url_list) == 1
     assert url_list[0] == expected
 
     # URI list input
-    url_list = Observations.get_urls([data_uri])
+    url_list = Observations.get_product_urls([data_uri])
     assert isinstance(url_list, list)
     assert len(url_list) == 1
     assert url_list[0] == expected
 
     # check invalid arg combo
     with pytest.warns(InputWarning, match = "Filtering is not supported"):
-        url_list = Observations.get_urls([data_uri], extension="png")
+        url_list = Observations.get_product_urls([data_uri], extension="png")
     assert isinstance(url_list, list)
     assert len(url_list) == 1
     assert url_list[0] == expected
 
     with pytest.warns(InputWarning, match = "Filtering is not supported"):
-        url_list = Observations.get_urls([data_uri], mrp=True)
+        url_list = Observations.get_product_urls([data_uri], mrp=True)
     assert isinstance(url_list, list)
     assert len(url_list) == 1
     assert url_list[0] == expected
@@ -1734,7 +1734,7 @@ def test_observations_get_urls(monkeypatch):
     Observations.disable_cloud_dataset()
 
     with pytest.warns(InputWarning, match="cloud data access is not enabled"):
-        result = Observations.get_urls(data_uri,cloud_only=True)
+        result = Observations.get_product_urls(data_uri,cloud_only=True)
     assert isinstance(result, list)
     assert len(result) > 0
 
@@ -1749,11 +1749,11 @@ def test_observations_get_urls(monkeypatch):
     )
 
     with pytest.warns(NoResultsWarning, match="No products to return urls for."):
-        result = Observations.get_urls(products)
+        result = Observations.get_product_urls(products)
     assert result is None
 
 
-def test_observations_get_urls_cloud_fallback(monkeypatch):
+def test_observations_get_product_urls_cloud_fallback(monkeypatch):
     Observations.enable_cloud_dataset()
     products = Table({
         "dataURI": [
@@ -1773,7 +1773,7 @@ def test_observations_get_urls_cloud_fallback(monkeypatch):
         ]
     )
 
-    result = Observations.get_urls(products)
+    result = Observations.get_product_urls(products)
     assert len(result) == 2
     assert result[0] == test_s3_uri
     assert result[1].startswith(
@@ -1781,7 +1781,7 @@ def test_observations_get_urls_cloud_fallback(monkeypatch):
     )
 
     # checking cloud_only
-    result = Observations.get_urls(products, cloud_only=True)
+    result = Observations.get_product_urls(products, cloud_only=True)
     assert len(result) == 1
     assert result[0] == test_s3_uri
 
@@ -1793,7 +1793,7 @@ def test_observations_get_urls_cloud_fallback(monkeypatch):
             "mast:JWST/product/test1.fits",
         ]
     })
-    result = Observations.get_urls(products)
+    result = Observations.get_product_urls(products)
     assert len(result) == 2
     assert result[0] == test_s3_uri
 
