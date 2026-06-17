@@ -1057,7 +1057,7 @@ class ObservationsClass(MastQueryWithLogin):
 
         return manifest
 
-    def get_urls(self, products, *, mrp_only=False, cloud_only=False, include_bucket=True,
+    def get_product_urls(self, products, *, mrp_only=False, cloud_only=False, include_bucket=True,
                  full_url=False, verbose=True, **filters):
         """
         Get URLs for data products.
