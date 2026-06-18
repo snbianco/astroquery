@@ -26,19 +26,11 @@ from astropy.utils.decorators import deprecated, deprecated_renamed_argument
 from requests import HTTPError, RequestException
 
 from astroquery import log
-from astroquery.exceptions import (
-    AuthenticationWarning,
-    InputWarning,
-    InvalidQueryError,
-    MaxResultsWarning,
-    NoResultsWarning,
-)
+from astroquery.exceptions import (AuthenticationWarning, InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning)
 from astroquery.mast import utils
 from astroquery.mast.core import MastQueryWithLogin
 from astroquery.utils import async_to_sync, commons
 from astroquery.utils.class_or_instance import class_or_instance
-
-from . import conf
 
 try:
     from fsspec.asyn import sync as fsspec_sync
@@ -201,7 +193,7 @@ class MastMissionsClass(MastQueryWithLogin):
     # Maximum number of input targets accepted in a single query
     _max_input_targets = 100
 
-    def __init__(self, *, mission='hst', mast_token=None):
+    def __init__(self, *, mission=None, mast_token=None):
         super().__init__(mast_token=mast_token)
 
         self.dataset_kwds = {  # column keywords corresponding to dataset ID
@@ -228,17 +220,29 @@ class MastMissionsClass(MastQueryWithLogin):
         # Search attributes
         self._search_option_fields = ['limit', 'offset', 'sort_by', 'search_key', 'sort_desc', 'select_cols',
                                       'skip_count', 'user_fields']
-        self.mission = mission  # current mission
         self.limit = 5000  # maximum number of results
         self.columns = dict()  # columns configuration for each mission
 
+        # The default mission to query. This is used when a mission is not explicitly provided in query methods.
+        # Default initialization of this class should not trigger network requests
+        # Only set default mission if explicitly provided, otherwise defer to property setters
+        # which will handle defaults without network calls
+        if not mission:
+            self._mission = "hst"  # default mission
+        else:
+            self.mission = mission  # Use the setter for validation if mission is provided
+
+        self._mission_to_search = self.mission  # mission in focus for metadata search use in parse_result
+
     @property
     def mission(self):
+        """The default mission to query."""
         return self._mission
 
     @mission.setter
     def mission(self, value):
-        # Setter that updates the service parameters if the mission is changed
+        """Set the mission to query and verify that it is available in the MAST Search API."""
+        self._verify_mission(value.lower())
         self._mission = value.lower()  # case-insensitive
         self._service_api_connection.set_service_params(self.service_dict, f'search/{self.mission}')
 
@@ -334,257 +338,29 @@ class MastMissionsClass(MastQueryWithLogin):
 
         Returns
         -------
-        response : `~astropy.table.Table`
+        missions : list
+            List of available missions in MAST Search API.
         """
+        if self._available_missions is not None:
+            return self._available_missions
 
-        if self.service == self._search:
-            results = self._service_api_connection._parse_result(response, verbose, data_key='results')
+        missions = []
+        html = utils._simple_request(f"{self._service_api_connection.MISSIONS_URL}docs").text
 
-            # If returning a count_only response, return the count as an integer
-            if isinstance(results, int):
-                return results
+        for match in re.findall(r'[\w/\.-]+openapi[\w/\.-]*\.json', html):
+            if match.startswith("/"):
+                continue
 
-            # Add column descriptions to column metadata
-            column_list = self.get_column_list()
-            for col in results.columns:
-                if col in column_list['name']:
-                    description = column_list[column_list['name'] == col]['description'].value[0]
-                    results[col].meta = {'description': str(description)}
+            mission = re.search(r'(.+?)_api_openapi\.json$', match).group(1)
+            if mission:
+                missions.append(mission)
 
-            # Add search parameters to table metadata
-            result_json = response.json()
-            results.meta['search_params'] = result_json.get('search_params', {})
-
-            # Warn if maximum results are returned
-            if len(results) >= self.limit:
-                warnings.warn("Maximum results returned, may not include all sources within radius.",
-                              MaxResultsWarning)
-            return results
-
-        elif self.service == self._list_products:
-            products = self._extract_products(response)
-            return Table(products)
-
-    def _validate_criteria(self, **criteria):
-        """
-        Check that criteria keyword arguments are valid column names for the mission.
-        Raises InvalidQueryError if a criteria argument is invalid.
-
-        Parameters
-        ----------
-        **criteria
-            Keyword arguments representing criteria filters to apply.
-
-        Raises
-        -------
-        InvalidQueryError
-            If a keyword does not match any valid column names, an error is raised that suggests the closest
-            matching column name, if available.
-        """
-        # Ensure that self.columns is populated
-        self.get_column_list()
-
-        # Check each criteria argument for validity
-        valid_cols = list(self.columns[self.mission]['name']) + self._search_option_fields
-        for kwd in criteria.keys():
-            if kwd == "pass_id" and "pass_id" not in valid_cols and "pass" in valid_cols:
-                # Special case where the actual column name is "pass", but that's a reserved keyword in Python
-                # We allow "pass_id" as an alias
-                kwd = "pass"
-            col = next((name for name in valid_cols if name == kwd), None)
-            if not col:
-                closest_match = difflib.get_close_matches(kwd, valid_cols, n=1)
-                error_msg = (
-                    f"Filter '{kwd}' does not exist. Did you mean '{closest_match[0]}'?"
-                    if closest_match
-                    else f"Filter '{kwd}' does not exist."
-                )
-                raise InvalidQueryError(error_msg)
-
-    def _build_params_from_criteria(self, params, **criteria):
-        """
-        Build the parameters for the API request based on the provided criteria.
-
-        Parameters
-        ----------
-        params : dict
-            Dictionary to store the parameters for the API request.
-        **criteria
-            Keyword arguments representing criteria filters to apply.
-        """
-        # Add each criterion to the params dictionary
-        params['conditions'] = []
-        for prop, value in criteria.items():
-            if prop not in self._search_option_fields:
-                if isinstance(value, list):
-                    # Convert to comma-separated string if passed as a list
-                    value = ','.join(str(item) for item in value)
-                params['conditions'].append({prop: value})
-            else:
-                if prop == 'sort_by' and isinstance(value, str):
-                    # Convert to list if passed as a string
-                    value = [value]
-                if prop == 'sort_desc' and isinstance(value, bool):
-                    # Convert to list if passed as a boolean
-                    value = [value]
-                params[prop] = value
-
-    def _parse_select_cols(self, select_cols):
-        """
-        Parse the select_cols parameter to ensure it is in the correct format.
-
-        Parameters
-        ----------
-        select_cols : iterable or str or None
-            The select_cols parameter to parse.
-
-        Returns
-        -------
-        list
-            A list of column names to select.
-
-        Raises
-        ------
-        InvalidQueryError
-            If select_cols is not an iterable of strings, a comma-separated string, 'all', or '*'.
-            If any individual column name is not a string.
-        """
-        if select_cols is None:
-            if self.mission == 'ullyses':
-                select_cols = self._default_ullyses_cols
-            return select_cols
-
-        # Handle special string cases first
-        all_columns = self.get_column_list()['name'].value.tolist()
-        if isinstance(select_cols, str):
-            if (select_cols.lower() == 'all' or select_cols == '*'):
-                return all_columns
-            # Comma-separated string
-            select_cols = select_cols.split(',')
-
-        # Handle an iterable
-        elif isinstance(select_cols, Iterable):
-            # Convert to list so we can iterate multiple times safely
-            select_cols = list(select_cols)
-
-        else:
-            raise InvalidQueryError(
-                "`select_cols` must be an iterable of column names, a comma-separated string, "
-                "'all', or '*'."
-            )
-
-        # Validate the column names
-        valid_select_cols = []
-        for col in select_cols:
-            if not isinstance(col, str):
-                raise InvalidQueryError(
-                    "`select_cols` must contain only strings (column names)."
-                )
-            col = col.strip()
-            if col not in all_columns:
-                closest_match = difflib.get_close_matches(col, all_columns, n=1)
-                suggestion = f' Did you mean "{closest_match[0]}"?' if closest_match else ''
-                warnings.warn(f"Column '{col}' not found.{suggestion}", InputWarning)
-            else:
-                valid_select_cols.append(col)
-
-        # Dataset ID column should always be returned
-        dataset_col = self.dataset_kwds.get(self.mission, None)
-        if dataset_col and dataset_col not in valid_select_cols:
-            valid_select_cols.append(dataset_col)
-        return valid_select_cols
-
-    def _parse_multiple_targets(self, *, coordinates=None, object_names=None, resolver=None):
-        """
-        Parse coordinate and object-name targets into a list of API target strings.
-
-        Parameters
-        ----------
-        coordinates : str, iterable of str, or `~astropy.coordinates` object, optional
-            Coordinate target(s). Can be a single coordinate string/object, a comma-separated
-            coordinate string, an iterable of coordinate strings/objects, or a vector
-            `~astropy.coordinates.SkyCoord`.
-        object_names : str or iterable of str, optional
-            Object-name target(s). Can be a single object name string, a comma-separated
-            object-name string, or an iterable of object-name strings.
-        resolver : str, optional
-            The resolver to use when resolving named targets into coordinates.
-
-        Returns
-        -------
-        list of str
-            A list of target strings in "ra dec" format for the API.
-        """
-        def _as_list(values):
-            """Normalize the input values into a list of strings or coordinate objects."""
-            if values is None:
-                items = []
-            elif isinstance(values, str):
-                items = [item.strip() for item in values.split(',') if item.strip()]
-            elif isinstance(values, Iterable) and not isinstance(values, (SkyCoord, BaseCoordinateFrame)):
-                items = list(values)
-            else:
-                items = [values]
-
-            return [item.strip() if isinstance(item, str) else item for item in items]
-
-        def _is_legacy_ra_dec_pair(items):
-            """Detect ['ra', 'dec'] passed as one coordinate split on comma."""
-            if len(items) != 2 or not all(isinstance(item, str) for item in items):
-                return False
-
-            try:
-                float(items[0])
-                float(items[1])
-                return True
-            except ValueError:
-                return False
-
-        coordinate_items = _as_list(coordinates)
-        object_name_items = _as_list(object_names)
-
-        # Backward compatibility for historical single-coordinate input like:
-        # coordinates="10.5, -20.1"
-        if _is_legacy_ra_dec_pair(coordinate_items):
-            coordinate_items = [f"{coordinate_items[0]} {coordinate_items[1]}"]
-
-        total_targets = len(coordinate_items) + len(object_name_items)
-
-        if total_targets == 0:
-            raise InvalidQueryError('No targets were provided.')
-
-        if total_targets > self._max_input_targets:
-            raise InvalidQueryError(
-                f'Too many input targets provided. Maximum supported is {self._max_input_targets}, '
-                f'got {total_targets}.'
-            )
-
-        targets = []
-
-        # Parse coordinate targets
-        for coord in coordinate_items:
-            sc = commons.parse_coordinates(coord, return_frame='icrs')
-            # If input is a vector SkyCoord, iterate through each coordinate
-            if isinstance(sc, SkyCoord) and sc.isscalar is False:
-                for ra, dec in zip(sc.ra.deg, sc.dec.deg):
-                    targets.append(f"{ra} {dec}")
-            else:
-                targets.append(f"{sc.ra.deg} {sc.dec.deg}")
-
-        # Parse object name targets
-        if object_names:
-            resolved = utils.resolve_object(object_name_items, resolver=resolver)
-            for name in object_name_items:
-                sc = resolved if isinstance(resolved, SkyCoord) else resolved.get(name)
-                if sc:
-                    targets.append(f"{sc.ra.deg} {sc.dec.deg}")
-
-        return targets
+        return missions
 
     @class_or_instance
     @deprecated_renamed_argument('objectname', 'object_names', since='0.4.12')
     def query_criteria_async(self, *, coordinates=None, object_names=None, radius=3*u.arcmin,
-                             limit=5000, offset=0, select_cols=None, resolver=None, count_only=False, **criteria):
+                             limit=5000, offset=0, select_cols=None, resolver=None, mission=None, count_only=False, **criteria):
         """
         Given a set of search criteria, returns a list of mission metadata.
 
@@ -620,6 +396,9 @@ class MastMissionsClass(MastQueryWithLogin):
             "SIMBAD" and "NED". If not specified, the default resolver order will be used. Please see the
             `STScI Archive Name Translation Application (SANTA) <https://mastresolver.stsci.edu/Santa-war/>`__
             for more information. Default is None.
+        mission : str, optional
+            The mission for which to query. If not provided, the current value of the
+            ``mission`` attribute will be used.
         count_only : bool, optional
             Default is False. If True, only the count of matching datasets will be returned.
         **criteria
@@ -646,11 +425,15 @@ class MastMissionsClass(MastQueryWithLogin):
         self.limit = limit
         self.service = self._search
 
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
+        self._mission_to_search = mission
+
         # Check that criteria arguments are valid
-        self._validate_criteria(**criteria)
+        self._validate_criteria(mission=mission, **criteria)
 
         # Build query
-        params = {"limit": self.limit, "offset": offset, "select_cols": self._parse_select_cols(select_cols)}
+        params = {"limit": self.limit, "offset": offset, "select_cols": self._parse_select_cols(select_cols, mission)}
 
         # Parse target information if coordinates or object names are provided
         if coordinates is not None or object_names is not None:
@@ -675,11 +458,11 @@ class MastMissionsClass(MastQueryWithLogin):
 
         self._build_params_from_criteria(params, **criteria)
 
-        return self._service_api_connection.missions_request_async(self.service, params)
+        return self._service_api_connection.missions_request_async(self.service, params, mission)
 
     @class_or_instance
     def query_region_async(self, coordinates, *, radius=3*u.arcmin, limit=5000, offset=0,
-                           select_cols=None, count_only=False, **criteria):
+                           select_cols=None, mission=None, count_only=False, **criteria):
         """
         Given a sky position (or positions) and radius, returns a list of matching dataset IDs.
 
@@ -704,6 +487,9 @@ class MastMissionsClass(MastQueryWithLogin):
             If None, a default set of columns will be returned.
             Can either be an iterable of column names, a comma-separated string of column names,
             or 'all'/'*' to return all available columns.
+        mission : str, optional
+            The mission for which to query. If not provided, the current value of the
+            ``mission`` attribute will be used.
         count_only : bool, optional
             Default is False. If True, only the count of matching datasets will be returned.
         **criteria
@@ -729,13 +515,14 @@ class MastMissionsClass(MastQueryWithLogin):
                                          limit=limit,
                                          offset=offset,
                                          select_cols=select_cols,
+                                         mission=mission,
                                          count_only=count_only,
                                          **criteria)
 
     @class_or_instance
     @deprecated_renamed_argument('objectname', 'object_names', since='0.4.12')
     def query_object_async(self, object_names, *, radius=3*u.arcmin, limit=5000, offset=0,
-                           select_cols=None, resolver=None, count_only=False, **criteria):
+                           select_cols=None, resolver=None, mission=None, count_only=False, **criteria):
         """
         Given an object name (or names), returns a list of matching rows.
 
@@ -765,6 +552,9 @@ class MastMissionsClass(MastQueryWithLogin):
             "SIMBAD" and "NED". If not specified, the default resolver order will be used. Please see the
             `STScI Archive Name Translation Application (SANTA) <https://mastresolver.stsci.edu/Santa-war/>`__
             for more information. Default is None.
+        mission : str, optional
+            The mission for which to query. If not provided, the current value of the
+            ``mission`` attribute will be used.
         count_only : bool, optional
             Default is False. If True, only the count of matching datasets will be returned.
         **criteria
@@ -786,11 +576,12 @@ class MastMissionsClass(MastQueryWithLogin):
                                          offset=offset,
                                          select_cols=select_cols,
                                          resolver=resolver,
+                                         mission=mission,
                                          count_only=count_only,
                                          **criteria)
 
     @class_or_instance
-    def get_product_list_async(self, datasets, *, batch_size=1000):
+    def get_product_list_async(self, datasets, *, batch_size=1000, mission=None):
         """
         Given a dataset ID or list of dataset IDs, returns a list of associated data products.
 
@@ -804,6 +595,9 @@ class MastMissionsClass(MastQueryWithLogin):
         batch_size : int, optional
             Default 1000. Number of dataset IDs to include in each batch request to the server.
             If you experience timeouts or connection errors, consider lowering this value.
+        mission : str, optional
+            The mission for which to query. If not provided, the current value of the
+            ``mission`` attribute will be used.
 
         Returns
         -------
@@ -812,10 +606,13 @@ class MastMissionsClass(MastQueryWithLogin):
 
         self.service = self._list_products
 
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
+
         if isinstance(datasets, Table) or isinstance(datasets, Row):
-            dataset_kwd = self.get_dataset_kwd()
+            dataset_kwd = self.get_dataset_kwd(mission=mission)
             if not dataset_kwd:
-                raise InvalidQueryError(f'Dataset keyword not found for mission "{self.mission}". Please input '
+                raise InvalidQueryError(f'Dataset keyword not found for mission "{mission}". Please input '
                                         'dataset IDs as a string, list of strings, or `~astropy.table.Column`.')
 
         # Extract dataset IDs based on input type and mission
@@ -844,7 +641,7 @@ class MastMissionsClass(MastQueryWithLogin):
             params={},
             max_batch=batch_size,
             param_key="dataset_ids",
-            request_func=lambda p: self._service_api_connection.missions_request_async(self.service, p),
+            request_func=lambda p: self._service_api_connection.missions_request_async(self.service, p, mission),
             extract_func=lambda r: [r],  # missions_request_async already returns one result
             desc=f"Fetching products for {len(datasets)} unique datasets"
         )
@@ -852,7 +649,7 @@ class MastMissionsClass(MastQueryWithLogin):
         # Return a list of responses
         return results
 
-    def get_unique_product_list(self, datasets, *, batch_size=1000):
+    def get_unique_product_list(self, datasets, *, batch_size=1000, mission=None):
         """
         Given a dataset ID or list of dataset IDs, returns a list of associated data products with unique
         filenames.
@@ -865,13 +662,16 @@ class MastMissionsClass(MastQueryWithLogin):
         batch_size : int, optional
             Default 1000. Number of dataset IDs to include in each batch request to the server.
             If you experience timeouts or connection errors, consider lowering this value.
+        mission : str, optional
+            The mission for which to query. If not provided, the current value of the
+            ``mission`` attribute will be used.
 
         Returns
         -------
         unique_products : `~astropy.table.Table`
             Table containing products with unique URIs.
         """
-        products = self.get_product_list(datasets, batch_size=batch_size)
+        products = self.get_product_list(datasets, batch_size=batch_size, mission=mission)
         unique_products = utils.remove_duplicate_products(products, 'filename')
         if len(unique_products) < len(products):
             log.info("To return all products, use `MastMissions.get_product_list`")
@@ -947,11 +747,14 @@ class MastMissionsClass(MastQueryWithLogin):
         url : str
             The full URL download path.
         """
-        current_mission = mission.lower() if mission else self.mission
 
-        if current_mission in ['hst', 'jwst', 'roman', 'roman_wfi', 'roman_spectra', 'roman_cgi', 'tess', 'hsla']:
+        # Construct the full data URL based on mission
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
+
+        if mission in ['hst', 'jwst', 'roman', 'roman_wfi', 'roman_spectra', 'roman_cgi', 'tess', 'hsla']:
             # Certain missions have a dedicated endpoint for retrieving products
-            base_url = (f"{self._service_api_connection.MISSIONS_DOWNLOAD_URL}{current_mission}"
+            base_url = (f"{self._service_api_connection.MISSIONS_URL}{mission}"
                         "/api/v0.1/retrieve_product")
             keyword = 'product_name'
         else:
@@ -959,8 +762,8 @@ class MastMissionsClass(MastQueryWithLogin):
             base_url = self._service_api_connection.MAST_DOWNLOAD_URL
             keyword = 'uri'
             # These files require a MAST URI and not just a filename
-            if not uri.startswith('mast'):
-                raise InvalidQueryError(f'For mission "{current_mission}", a full MAST URI is required '
+            if not uri.startswith('mast:'):
+                raise InvalidQueryError(f'For mission "{mission}", a full MAST URI is required '
                                         f'for downloading. Got "{uri}".')
 
         return base_url + f'?{keyword}=' + quote(uri, safe='')
@@ -1046,69 +849,8 @@ class MastMissionsClass(MastQueryWithLogin):
 
         return status, msg, url
 
-    def _download_files(self, products, base_dir, *, flat=False, cache=True, verbose=True):
-        """
-        Downloads files listed in an `~astropy.table.Table` of data products to a specified directory.
-
-        Parameters
-        ----------
-        products : `~astropy.table.Table`
-            Table containing products to be downloaded.
-        base_dir : str
-            Directory in which files will be downloaded.
-        flat : bool
-            Default is False.  If True, all files are downloaded directly to `base_dir`, and no subdirectories
-            will be created.
-        cache : bool
-            Default is True. If file is found on disk, it will not be downloaded again.
-        verbose : bool, optional
-            Default is True. Whether to show download progress in the console.
-
-        Returns
-        -------
-        response : `~astropy.table.Table`
-            Table containing download results for each data product file.
-        """
-        manifest_entries = []
-        base_dir = Path(base_dir)
-
-        for data_product in products:
-            col_names = data_product.colnames
-            # Determine local path for each file
-            filename = data_product['filename']
-            uri = data_product['uri'] if 'uri' in col_names else filename
-            dataset = None
-            if 'dataset' in col_names:
-                dataset = data_product['dataset']
-            elif 'fileset' in col_names:
-                dataset = data_product['fileset']
-            if not dataset and not flat:
-                raise InvalidQueryError('Data product is missing "dataset" or "fileset" field required for '
-                                        'constructing local download path. Specify `flat=True` to avoid this '
-                                        'requirement.')
-
-            # If the products are a subscription JSON, they should include a mission field
-            mission = data_product['mission'].lower() if 'mission' in col_names else self.mission
-
-            # Create the local file path
-            local_path = base_dir if flat else base_dir / 'mastDownload' / mission / dataset
-            local_path.mkdir(parents=True, exist_ok=True)
-            local_file_path = local_path / Path(filename).name
-
-            # Download files and record status
-            status, msg, url = self.download_file(uri,
-                                                  local_path=local_file_path,
-                                                  cache=cache,
-                                                  mission=mission,
-                                                  verbose=verbose)
-            manifest_entries.append([local_file_path, status, msg, url])
-
-        # Return manifest as Astropy Table
-        manifest = Table(rows=manifest_entries, names=('Local Path', 'Status', 'Message', 'URL'))
-        return manifest
-
     def download_products(self, products, *, download_dir=None, flat=False,
-                          cache=True, extension=None, verbose=True, **filters):
+                          cache=True, extension=None, mission=None, verbose=True, **filters):
         """
         Download specified data products.
 
@@ -1128,6 +870,10 @@ class MastMissionsClass(MastQueryWithLogin):
             Default is True. If file is found on disc, it will not be downloaded again.
         extension : string or list, optional
             Default is None. Filter by file extension.
+        mission : str, optional
+            The mission to which the products belong. If not provided, the current value of the
+            ``mission`` attribute will be used.
+            If
         verbose : bool, optional
             Default is True. Whether to show download progress in the console.
         **filters :
@@ -1144,6 +890,9 @@ class MastMissionsClass(MastQueryWithLogin):
         """
         if not products:
             raise InvalidQueryError('No products specified for download.')
+
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
 
         # Ensure `products` is a Table, collecting products if necessary
         if (isinstance(products, str) and products.endswith('.json')) or isinstance(products, Path):
@@ -1186,6 +935,7 @@ class MastMissionsClass(MastQueryWithLogin):
                                         base_dir=download_dir,
                                         flat=flat,
                                         cache=cache,
+                                        mission=mission,
                                         verbose=verbose)
 
         return manifest
@@ -1378,19 +1128,30 @@ class MastMissionsClass(MastQueryWithLogin):
         return resp.headers.get("Location")
 
     @class_or_instance
-    def get_column_list(self):
+    def get_column_list(self, mission=None):
         """
         For a mission, return a list of all searchable columns and their descriptions
+
+        Parameters
+        ----------
+        mission : str, optional
+            The mission for which to retrieve the column list. If not provided, the current value
+            of the ``mission`` attribute will be used.
 
         Returns
         -------
         response : `~astropy.table.Table` that contains columns names, types, and descriptions
         """
-        if not self.columns.get(self.mission):
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
+
+        if not self.columns.get(mission):
             try:
                 # Send server request to get column list for current mission
-                params = {'mission': self.mission}
-                resp = utils._simple_request(f'{conf.server}/search/util/api/v0.1/column_list', params)
+                params = {'mission': mission}
+                resp = utils._simple_request(
+                    f'{self._service_api_connection.MISSIONS_URL}util/api/v0.1/column_list', params
+                )
 
                 # Parse JSON and extract necessary info
                 results = resp.json()
@@ -1401,36 +1162,423 @@ class MastMissionsClass(MastQueryWithLogin):
 
                 # Create Table with parsed data
                 col_table = Table(rows=rows, names=('name', 'data_type', 'description'))
-                self.columns[self.mission] = col_table
+                self.columns[mission] = col_table
             except JSONDecodeError as ex:
                 raise JSONDecodeError(f'Failed to decode JSON response while attempting to get column list'
-                                      f' for mission {self.mission}: {ex}')
+                                      f' for mission {mission}: {ex}')
             except RequestException as ex:
                 raise ConnectionError(f'Failed to connect to the server while attempting to get column list'
-                                      f' for mission {self.mission}: {ex}')
+                                      f' for mission {mission}: {ex}')
             except KeyError as ex:
                 raise KeyError(f'Expected key not found in response data while attempting to get column list'
-                               f' for mission {self.mission}: {ex}')
+                               f' for mission {mission}: {ex}')
             except Exception as ex:
                 raise RuntimeError(f'An unexpected error occurred while attempting to get column list'
-                                   f' for mission {self.mission}: {ex}')
+                                   f' for mission {mission}: {ex}')
 
-        return self.columns[self.mission]
+        return self.columns[mission]
 
-    def get_dataset_kwd(self):
+    def get_dataset_kwd(self, *, mission=None):
         """
         Return the Dataset ID keyword for the selected mission. If the keyword is unknown, returns None.
+
+        Parameters
+        ----------
+        mission : str, optional
+            The mission for which to retrieve the dataset ID keyword. If not provided, the current value
+            of the ``mission`` attribute will be used.
 
         Returns
         -------
         keyword : str or None
             Dataset ID keyword or None if unknown.
         """
-        if self.mission not in self.dataset_kwds:
-            log.warning('The mission "%s" does not have a known dataset ID keyword.', self.mission)
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
+
+        if mission not in self.dataset_kwds:
+            log.warning('The mission "%s" does not have a known dataset ID keyword.', mission)
             return None
 
-        return self.dataset_kwds[self.mission]
+        return self.dataset_kwds[mission]
+
+    def _verify_mission(self, mission):
+        """
+        Verify that the specified mission is available in the MAST Search API.
+
+        Parameters
+        ----------
+        mission : str
+            The mission to verify.
+
+        Raises
+        ------
+        InvalidQueryError
+            If the specified mission is not available in the MAST Search API.
+        """
+        if mission not in self.available_missions:
+            closest = difflib.get_close_matches(mission, self.available_missions, n=1)
+            suggestion = f" Did you mean '{closest[0]}'? " if closest else ""
+            raise InvalidQueryError(
+                f"Mission '{mission}' is not available in the MAST Search API.{suggestion} "
+                f"Available missions are: {', '.join(self.available_missions)}."
+            )
+
+    def _extract_products(self, response):
+        """
+        Extract products from the response of a `~requests.Response` object.
+
+        Parameters
+        ----------
+        response : `~requests.Response`
+            The response object containing the products data.
+
+        Returns
+        -------
+        list
+            A list of products extracted from the response.
+        """
+        combined = []
+        for resp in response:
+            products = resp.json().get('products', [])
+            # Flatten if nested
+            if products and isinstance(products[0], list):
+                products = products[0]
+            combined.extend(products)
+        return combined
+
+    def _parse_result(self, response, *, verbose=False):  # Used by the async_to_sync decorator functionality
+        """
+        Parse the results of a `~requests.Response` objects and return an `~astropy.table.Table` of results.
+
+        Parameters
+        ----------
+        response : `~requests.Response`
+            `~requests.Response` objects.
+        verbose : bool
+            (presently does nothing - there is no output with verbose set to
+            True or False)
+            Default False. Setting to True provides more extensive output.
+
+        Returns
+        -------
+        response : `~astropy.table.Table`
+        """
+
+        if self.service == self._search:
+            results = self._service_api_connection._parse_result(response, verbose, data_key='results')
+
+            # If returning a count_only response, return the count as an integer
+            if isinstance(results, int):
+                return results
+
+            # Add column descriptions to column metadata
+            column_list = self.get_column_list(self._mission_to_search)
+            for col in results.columns:
+                if col in column_list['name']:
+                    description = column_list[column_list['name'] == col]['description'].value[0]
+                    results[col].meta = {'description': str(description)}
+
+            # Add search parameters to table metadata
+            result_json = response.json()
+            results.meta['search_params'] = result_json.get('search_params', {})
+
+            # Warn if maximum results are returned
+            if len(results) >= self.limit:
+                warnings.warn("Maximum results returned, may not include all sources within radius.",
+                              MaxResultsWarning)
+            return results
+
+        elif self.service == self._list_products:
+            products = self._extract_products(response)
+            return Table(products)
+
+    def _validate_criteria(self, *, mission=None, **criteria):
+        """
+        Check that criteria keyword arguments are valid column names for the mission.
+        Raises InvalidQueryError if a criteria argument is invalid.
+
+        Parameters
+        ----------
+        mission : str, optional
+            The mission for which to validate criteria. If not provided, the current value of
+            the ``mission`` attribute will be used.
+        **criteria
+            Keyword arguments representing criteria filters to apply.
+
+        Raises
+        -------
+        InvalidQueryError
+            If a keyword does not match any valid column names, an error is raised that suggests the closest
+            matching column name, if available.
+        """
+        # Ensure that self.columns is populated
+        self.get_column_list(mission)
+
+        # Check each criteria argument for validity
+        valid_cols = list(self.columns[mission]['name']) + self._search_option_fields
+        for kwd in criteria.keys():
+            if kwd == "pass_id" and "pass_id" not in valid_cols and "pass" in valid_cols:
+                # Special case where the actual column name is "pass", but that's a reserved keyword in Python
+                # We allow "pass_id" as an alias
+                kwd = "pass"
+            col = next((name for name in valid_cols if name == kwd), None)
+            if not col:
+                closest_match = difflib.get_close_matches(kwd, valid_cols, n=1)
+                error_msg = (
+                    f"Filter '{kwd}' does not exist. Did you mean '{closest_match[0]}'?"
+                    if closest_match
+                    else f"Filter '{kwd}' does not exist."
+                )
+                raise InvalidQueryError(error_msg)
+
+    def _build_params_from_criteria(self, params, **criteria):
+        """
+        Build the parameters for the API request based on the provided criteria.
+
+        Parameters
+        ----------
+        params : dict
+            Dictionary to store the parameters for the API request.
+        **criteria
+            Keyword arguments representing criteria filters to apply.
+        """
+        # Add each criterion to the params dictionary
+        params['conditions'] = []
+        for prop, value in criteria.items():
+            if prop not in self._search_option_fields:
+                if isinstance(value, list):
+                    # Convert to comma-separated string if passed as a list
+                    value = ','.join(str(item) for item in value)
+                params['conditions'].append({prop: value})
+            else:
+                if prop == 'sort_by' and isinstance(value, str):
+                    # Convert to list if passed as a string
+                    value = [value]
+                if prop == 'sort_desc' and isinstance(value, bool):
+                    # Convert to list if passed as a boolean
+                    value = [value]
+                params[prop] = value
+
+    def _parse_select_cols(self, select_cols, mission):
+        """
+        Parse the select_cols parameter to ensure it is in the correct format.
+
+        Parameters
+        ----------
+        select_cols : iterable or str or None
+            The select_cols parameter to parse.
+        mission : str
+            The mission for which to parse select_cols. If not provided, the current value
+            of the ``mission`` attribute will be used.
+
+        Returns
+        -------
+        list
+            A list of column names to select.
+
+        Raises
+        ------
+        InvalidQueryError
+            If select_cols is not an iterable of strings, a comma-separated string, 'all', or '*'.
+            If any individual column name is not a string.
+        """
+        if select_cols is None:
+            if mission == 'ullyses':
+                return self._default_ullyses_cols
+            return []
+
+        # Handle special string cases first
+        all_columns = self.get_column_list(mission)['name'].value.tolist()
+        if isinstance(select_cols, str):
+            if (select_cols.lower() == 'all' or select_cols == '*'):
+                return all_columns
+            # Comma-separated string
+            select_cols = select_cols.split(',')
+
+        # Handle an iterable
+        elif isinstance(select_cols, Iterable):
+            # Convert to list so we can iterate multiple times safely
+            select_cols = list(select_cols)
+
+        else:
+            raise InvalidQueryError(
+                "`select_cols` must be an iterable of column names, a comma-separated string, "
+                "'all', or '*'."
+            )
+
+        # Validate the column names
+        valid_select_cols = []
+        for col in select_cols:
+            if not isinstance(col, str):
+                raise InvalidQueryError(
+                    "`select_cols` must contain only strings (column names)."
+                )
+            col = col.strip()
+            if col not in all_columns:
+                closest_match = difflib.get_close_matches(col, all_columns, n=1)
+                suggestion = f' Did you mean "{closest_match[0]}"?' if closest_match else ''
+                warnings.warn(f"Column '{col}' not found.{suggestion}", InputWarning)
+            else:
+                valid_select_cols.append(col)
+
+        # Dataset ID column should always be returned
+        dataset_col = self.dataset_kwds.get(mission, None)
+        if dataset_col and dataset_col not in valid_select_cols:
+            valid_select_cols.append(dataset_col)
+        return valid_select_cols
+
+    def _parse_multiple_targets(self, *, coordinates=None, object_names=None, resolver=None):
+        """
+        Parse coordinate and object-name targets into a list of API target strings.
+
+        Parameters
+        ----------
+        coordinates : str, iterable of str, or `~astropy.coordinates` object, optional
+            Coordinate target(s). Can be a single coordinate string/object, a comma-separated
+            coordinate string, an iterable of coordinate strings/objects, or a vector
+            `~astropy.coordinates.SkyCoord`.
+        object_names : str or iterable of str, optional
+            Object-name target(s). Can be a single object name string, a comma-separated
+            object-name string, or an iterable of object-name strings.
+        resolver : str, optional
+            The resolver to use when resolving named targets into coordinates.
+
+        Returns
+        -------
+        list of str
+            A list of target strings in "ra dec" format for the API.
+        """
+        def _as_list(values):
+            """Normalize the input values into a list of strings or coordinate objects."""
+            if values is None:
+                items = []
+            elif isinstance(values, str):
+                items = [item.strip() for item in values.split(',') if item.strip()]
+            elif isinstance(values, Iterable) and not isinstance(values, (SkyCoord, BaseCoordinateFrame)):
+                items = list(values)
+            else:
+                items = [values]
+
+            return [item.strip() if isinstance(item, str) else item for item in items]
+
+        def _is_legacy_ra_dec_pair(items):
+            """Detect ['ra', 'dec'] passed as one coordinate split on comma."""
+            if len(items) != 2 or not all(isinstance(item, str) for item in items):
+                return False
+
+            try:
+                float(items[0])
+                float(items[1])
+                return True
+            except ValueError:
+                return False
+
+        coordinate_items = _as_list(coordinates)
+        object_name_items = _as_list(object_names)
+
+        # Backward compatibility for historical single-coordinate input like:
+        # coordinates="10.5, -20.1"
+        if _is_legacy_ra_dec_pair(coordinate_items):
+            coordinate_items = [f"{coordinate_items[0]} {coordinate_items[1]}"]
+
+        total_targets = len(coordinate_items) + len(object_name_items)
+
+        if total_targets == 0:
+            raise InvalidQueryError('No targets were provided.')
+
+        if total_targets > self._max_input_targets:
+            raise InvalidQueryError(
+                f'Too many input targets provided. Maximum supported is {self._max_input_targets}, '
+                f'got {total_targets}.'
+            )
+
+        targets = []
+
+        # Parse coordinate targets
+        for coord in coordinate_items:
+            sc = commons.parse_coordinates(coord, return_frame='icrs')
+            # If input is a vector SkyCoord, iterate through each coordinate
+            if isinstance(sc, SkyCoord) and sc.isscalar is False:
+                for ra, dec in zip(sc.ra.deg, sc.dec.deg):
+                    targets.append(f"{ra} {dec}")
+            else:
+                targets.append(f"{sc.ra.deg} {sc.dec.deg}")
+
+        # Parse object name targets
+        if object_names:
+            resolved = utils.resolve_object(object_name_items, resolver=resolver)
+            for name in object_name_items:
+                sc = resolved if isinstance(resolved, SkyCoord) else resolved.get(name)
+                if sc:
+                    targets.append(f"{sc.ra.deg} {sc.dec.deg}")
+
+        return targets
+
+    def _download_files(self, products, base_dir, *, flat=False, cache=True, mission=None, verbose=True):
+        """
+        Downloads files listed in an `~astropy.table.Table` of data products to a specified directory.
+
+        Parameters
+        ----------
+        products : `~astropy.table.Table`
+            Table containing products to be downloaded.
+        base_dir : str
+            Directory in which files will be downloaded.
+        flat : bool
+            Default is False.  If True, all files are downloaded directly to `base_dir`, and no subdirectories
+            will be created.
+        cache : bool
+            Default is True. If file is found on disk, it will not be downloaded again.
+        mission : str, optional
+            The mission to which the products belong. If not provided, the current value of the ``mission``
+            attribute will be used.
+        verbose : bool, optional
+            Default is True. Whether to show download progress in the console.
+
+        Returns
+        -------
+        response : `~astropy.table.Table`
+            Table containing download results for each data product file.
+        """
+
+        manifest_entries = []
+        base_dir = Path(base_dir)
+
+        for data_product in products:
+            col_names = data_product.colnames
+            # Determine local path for each file
+            filename = data_product['filename']
+            uri = data_product['uri'] if 'uri' in col_names else filename
+            dataset = None
+            if 'dataset' in col_names:
+                dataset = data_product['dataset']
+            elif 'fileset' in col_names:
+                dataset = data_product['fileset']
+            if not dataset and not flat:
+                raise InvalidQueryError('Data product is missing "dataset" or "fileset" field required for '
+                                        'constructing local download path. Specify `flat=True` to avoid this '
+                                        'requirement.')
+
+            # If the products are a subscription JSON, they should include a mission field
+            mission = data_product['mission'].lower() if 'mission' in col_names else mission
+
+            # Create the local file path
+            local_path = base_dir if flat else base_dir / 'mastDownload' / mission / dataset
+            local_path.mkdir(parents=True, exist_ok=True)
+            local_file_path = local_path / Path(filename).name
+
+            # Download files and record status
+            status, msg, url = self.download_file(uri,
+                                                  local_path=local_file_path,
+                                                  cache=cache,
+                                                  mission=mission,
+                                                  verbose=verbose)
+            manifest_entries.append([local_file_path, status, msg, url])
+
+        # Return manifest as Astropy Table
+        manifest = Table(rows=manifest_entries, names=('Local Path', 'Status', 'Message', 'URL'))
+        return manifest
 
 
 MastMissions = MastMissionsClass()

@@ -276,6 +276,30 @@ def zcut_download_mockreturn(url, file_path):
 ###########################
 
 
+def test_missions_get_missions():
+    # Access attribute
+    missions = MastMissions.available_missions
+    assert isinstance(missions, list)
+    assert len(missions) == 9
+
+    result = MastMissions.get_missions()
+    assert missions == result
+
+
+def test_missions_verify_mission():
+    MastMissions._verify_mission("hst")
+
+    # Invalid mission with a possible match
+    with pytest.raises(InvalidQueryError, match="Did you mean 'hst'?"):
+        MastMissions._verify_mission("hsp")
+
+    # Invalid mission with no match
+    with pytest.raises(InvalidQueryError) as err:
+        MastMissions._verify_mission("invalid")
+        assert "Did you mean" not in str(err.value)
+        assert "Mission 'invalid' is not available" in str(err.value)
+
+
 def test_missions_query_region_async():
     responses = MastMissions.query_region_async(regionCoords, radius=0.002, sci_pi_last_name='GORDON')
     assert isinstance(responses, MockResponse)
@@ -371,45 +395,45 @@ def test_missions_query_criteria():
 
 def test_missions_parse_select_cols():
     # Default columns
-    cols = MastMissions._parse_select_cols(None)  # Default columns for HST
-    assert cols is None
+    cols = MastMissions._parse_select_cols(None, mission='hst')  # Default columns for HST
+    assert cols == []
 
     # All columns
-    all_cols = MastMissions._parse_select_cols('all')
-    assert all_cols == MastMissions.get_column_list()['name'].value.tolist()
+    all_cols = MastMissions._parse_select_cols('all', mission='hst')
+    assert all_cols == MastMissions.get_column_list(mission='hst')['name'].value.tolist()
     assert MastMissions._parse_select_cols('*') == all_cols
 
     # Comma-separated string
-    string_cols = MastMissions._parse_select_cols('sci_pep_id, sci_instrume')
+    string_cols = MastMissions._parse_select_cols('sci_pep_id, sci_instrume', mission='hst')
     for col in ['sci_pep_id', 'sci_instrume', 'sci_data_set_name']:
         assert col in string_cols
 
     # List of columns
-    list_cols = MastMissions._parse_select_cols(['sci_pep_id', 'sci_instrume'])
+    list_cols = MastMissions._parse_select_cols(['sci_pep_id', 'sci_instrume'], mission='hst')
     for col in ['sci_pep_id', 'sci_instrume', 'sci_data_set_name']:
         assert col in list_cols
 
     # Tuple of columns
-    tuple_cols = MastMissions._parse_select_cols(('sci_pep_id', 'sci_instrume'))
+    tuple_cols = MastMissions._parse_select_cols(('sci_pep_id', 'sci_instrume'), mission='hst')
     for col in ['sci_pep_id', 'sci_instrume', 'sci_data_set_name']:
         assert col in tuple_cols
 
     # Generator of columns
-    gen_cols = MastMissions._parse_select_cols(col for col in ['sci_pep_id', 'sci_instrume'])
+    gen_cols = MastMissions._parse_select_cols((col for col in ['sci_pep_id', 'sci_instrume']), mission='hst')
     for col in ['sci_pep_id', 'sci_instrume', 'sci_data_set_name']:
         assert col in gen_cols
 
     # Error if invalid type
     with pytest.raises(InvalidQueryError, match="`select_cols` must be an iterable of column names"):
-        MastMissions._parse_select_cols(123)
+        MastMissions._parse_select_cols(123, mission='hst')
 
     # Error if an individual column is not a string
     with pytest.raises(InvalidQueryError, match="`select_cols` must contain only strings"):
-        MastMissions._parse_select_cols(['sci_pep_id', 123])
+        MastMissions._parse_select_cols(['sci_pep_id', 123], mission='hst')
 
     # Warning for invalid column names
     with pytest.warns(InputWarning, match="Column 'invalid_column' not found."):
-        valid_cols = MastMissions._parse_select_cols(['sci_pep_id', 'invalid_column'])
+        valid_cols = MastMissions._parse_select_cols(['sci_pep_id', 'invalid_column'], mission='hst')
     assert 'sci_pep_id' in valid_cols
     assert 'invalid_column' not in valid_cols
 
@@ -420,7 +444,7 @@ def test_missions_parse_select_cols():
 
     # Workaround for Ullyses mission default columns
     ullyses_mission = MastMissions(mission='ullyses')
-    ullyses_cols = ullyses_mission._parse_select_cols(None)
+    ullyses_cols = ullyses_mission._parse_select_cols(None, mission='ullyses')
     for col in MastMissions._default_ullyses_cols:
         assert col in ullyses_cols
 
@@ -514,8 +538,8 @@ def test_missions_get_product_list_async():
     assert 'Dataset list is empty' in str(err_empty.value)
 
     # No dataset keyword
-    with pytest.raises(InvalidQueryError, match='Dataset keyword not found for mission "invalid"'):
-        missions = MastMissions(mission='invalid')
+    with pytest.raises(InvalidQueryError, match='Dataset keyword not found for mission "roman_spectra".'):
+        missions = MastMissions(mission='roman_spectra')
         missions.get_product_list_async(Table({'a': [1, 2, 3]}))
 
 
@@ -532,6 +556,10 @@ def test_missions_get_product_list():
     # Row input
     datasets = MastMissions.query_object("M101", radius=".002 deg")
     result = MastMissions.get_product_list(datasets[:3])
+    assert isinstance(result, Table)
+
+    # Column input
+    result = MastMissions.get_product_list(datasets['sci_data_set_name'])
     assert isinstance(result, Table)
 
     # Table input
@@ -758,6 +786,93 @@ def test_missions_get_dataset_kwd(caplog):
     assert m.get_dataset_kwd() is None
     with caplog.at_level('WARNING', logger='astroquery'):
         assert 'The mission "unknown" does not have a known dataset ID keyword' in caplog.text
+
+
+def test_missions_get_cloud_uri_map(patch_boto3):
+    missions_uri = 'u9o40504m/u9o40504m_c3m.fits'
+    expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
+
+    # Table input
+    product = Table()
+    product['uri'] = [missions_uri]
+    uri_map = MastMissions.get_cloud_uri_map(product)
+    assert isinstance(uri_map, dict)
+    assert len(uri_map) == 1
+    assert uri_map[missions_uri] == expected
+
+    # List input
+    uri_map = MastMissions.get_cloud_uri_map([missions_uri])
+    assert isinstance(uri_map, dict)
+    assert len(uri_map) == 1
+    assert uri_map[missions_uri] == expected
+
+    # Return full URLs
+    uri_map = MastMissions.get_cloud_uri_map([missions_uri], include_bucket=False, full_url=True)
+    assert isinstance(uri_map, dict)
+    assert uri_map[missions_uri].startswith('http://s3.amazonaws.com/')
+
+    # Warn if attempting to filter with list input
+    with pytest.warns(InputWarning, match='Filtering is not supported'):
+        MastMissions.get_cloud_uri_map([missions_uri],
+                                       extension='png')
+
+    # Warn if not found
+    with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+        MastMissions.get_cloud_uri_map(['mast:HST/product/does_not_exist.fits'])
+
+    # Cloud access not enabled
+    Observations.disable_cloud_dataset()
+    with pytest.raises(RemoteServiceError, match='Cloud data access is not enabled.'):
+        MastMissions.get_cloud_uri_map([missions_uri])
+
+    # Warn if no matching products are provided
+    with pytest.warns(NoResultsWarning, match='No matching products to fetch associated cloud URIs.'):
+        MastMissions.get_cloud_uri_map([])
+
+
+@pytest.mark.parametrize(
+    'include_bucket, full_url, expected',
+    [
+        (True, False, 's3://example-bucket/test.asdf'),
+        (False, False, 'test.asdf'),
+        (False, True, 'https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123'),
+    ],
+)
+def test_missions_get_cloud_uri_map_roman(include_bucket, full_url, expected):
+    missions = MastMissions(mission='roman')
+    result = missions.get_cloud_uri_map(
+        ['mast:ROMAN/product/test.asdf'],
+        include_bucket=include_bucket,
+        full_url=full_url,
+    )
+    assert result == {'mast:ROMAN/product/test.asdf': expected}
+
+
+def test_missions_get_cloud_uri_map_roman_path_style():
+    missions = MastMissions(mission='roman')
+    result = missions.get_cloud_uri_map(
+        ['mast:ROMAN/product/path_style.asdf'],
+        include_bucket=True,
+        full_url=False,
+    )
+    assert result == {'mast:ROMAN/product/path_style.asdf': 's3://example-bucket/path_style.asdf'}
+
+
+def test_missions_get_cloud_uri_map_roman_invalid():
+    missions = MastMissions(mission='roman')
+    with pytest.raises(InvalidQueryError, match="Unable to determine S3 bucket from URL"):
+        missions.get_cloud_uri_map(
+            ['mast:ROMAN/product/invalid.asdf'],
+            include_bucket=True,
+            full_url=False,
+        )
+
+
+def test_missions_get_cloud_uri_map_conflicting_options():
+    with pytest.raises(InvalidQueryError, match='include_bucket must be set to False when full_url is True'):
+        MastMissions.get_cloud_uri_map(
+            ['mast:JWST/product/test.fits'], include_bucket=True, full_url=True
+        )
 
 
 def test_missions_get_cloud_uri_map(patch_boto3):
