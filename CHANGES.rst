@@ -87,6 +87,7 @@ mast
 - The ``objectname`` keyword is deprecated in ``MastMissions`` in favor of ``object_names``. [#3540]
 - The ``objectname`` parameter in ``Catalogs``, ``Observations``, ``Tesscut``, and ``utils`` is deprecated
   in favor of ``object_name``. [#3567]
+- Gaia cone search now defaults to DR3. Previously, DR3 was not supported and the default was DR2. [#3622]
 - ``Catalogs`` has been refactored around VO-TAP queries. The new workflow uses ``collection`` + ``catalog`` (instead of HSC/PanSTARRS-specific
   assumptions), supports discovery helpers (``get_collections``, ``get_catalogs``, ``get_column_metadata``), and
   adds ``supports_spatial_queries`` to inspect positional-query support before querying. [#3582]
