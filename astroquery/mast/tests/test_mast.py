@@ -1607,6 +1607,197 @@ def test_observations_disable_cloud_dataset(patch_boto3):
     assert Observations._cloud_enabled_explicitly is False
 
 
+def test_observations_build_products_list(monkeypatch):
+    obsid = '2003738726'
+    data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
+
+    # checking invalid arg combos
+    with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        products, uri_list = Observations._build_products_list([data_uri], extension="png")
+    assert isinstance(products, list) and isinstance(uri_list, list)
+    assert len(uri_list) == 1
+
+    with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        products, uri_list = Observations._build_products_list([data_uri], mrp=True)
+    assert isinstance(products, list) and isinstance(uri_list, list)
+    assert len(uri_list) == 1
+
+    # obsid input
+    products, uri_list = Observations._build_products_list(obsid)
+    assert isinstance(products, Table)
+    assert all(products["obsID"] == obsid)
+    assert not uri_list
+
+    # list of obsid input
+    products, uri_list = Observations._build_products_list([obsid])
+    assert isinstance(products, Table)
+    assert all(products["obsID"] == obsid)
+    assert not uri_list
+
+    # row input
+    product = Table()
+    product['dataURI'] = [data_uri]
+    products, uri_list = Observations._build_products_list(product[0])
+    assert isinstance(products, Table)
+    assert all(product["dataURI"] == data_uri)
+    assert not uri_list
+
+    # table input
+    product = Table()
+    product['dataURI'] = [data_uri]
+    products, uri_list = Observations._build_products_list(product)
+    assert isinstance(products, Table)
+    assert all(products["dataURI"] == data_uri)
+    assert not uri_list
+
+    # URI input
+    products, uri_list = Observations._build_products_list(data_uri)
+    assert isinstance(uri_list, list)
+    assert len(uri_list) == 1
+    assert uri_list[0] == data_uri
+
+    # URI list input
+    products, uri_list = Observations._build_products_list([data_uri])
+    assert isinstance(uri_list, list)
+    assert len(uri_list) == 1
+    assert uri_list[0] == data_uri
+
+
+def test_observations_get_product_urls(monkeypatch):
+    obsid = '2003738726'
+    data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
+    expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
+
+    # checking invalid arg combos
+    with pytest.raises(InvalidQueryError,
+                       match="`include_bucket` must be False"):
+        Observations.get_product_urls(
+            obsid,
+            include_bucket=True,
+            full_url=True
+        )
+    # disable cloud
+    Observations.disable_cloud_dataset()
+    # obsid input
+    url_list = Observations.get_product_urls(obsid)
+    assert isinstance(url_list, list)
+
+    # list of obsid input
+    url_list = Observations.get_product_urls([obsid])
+    assert isinstance(url_list, list)
+
+    # reenable cloud
+    Observations.enable_cloud_dataset()
+
+    # row input
+    product = Table()
+    product['dataURI'] = [data_uri]
+    url_list = Observations.get_product_urls(product[0])
+    assert isinstance(url_list, list)
+    assert len(url_list) == 1
+    assert url_list[0] == expected
+
+    # table input
+    product = Table()
+    product['dataURI'] = [data_uri]
+    url_list = Observations.get_product_urls(product)
+    assert isinstance(url_list, list)
+    assert len(url_list) == 1
+    assert url_list[0] == expected
+
+    # URI input
+    url_list = Observations.get_product_urls(data_uri)
+    assert isinstance(url_list, list)
+    assert len(url_list) == 1
+    assert url_list[0] == expected
+
+    # URI list input
+    url_list = Observations.get_product_urls([data_uri])
+    assert isinstance(url_list, list)
+    assert len(url_list) == 1
+    assert url_list[0] == expected
+
+    # check invalid arg combo
+    with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        url_list = Observations.get_product_urls([data_uri], extension="png")
+    assert isinstance(url_list, list)
+    assert len(url_list) == 1
+    assert url_list[0] == expected
+
+    with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        url_list = Observations.get_product_urls([data_uri], mrp=True)
+    assert isinstance(url_list, list)
+    assert len(url_list) == 1
+    assert url_list[0] == expected
+
+    # check warning for cloud_only but cloud_disabled
+    Observations.disable_cloud_dataset()
+
+    with pytest.warns(InputWarning, match="cloud data access is not enabled"):
+        result = Observations.get_product_urls(data_uri,cloud_only=True)
+    assert isinstance(result, list)
+    assert len(result) > 0
+
+    # check no products after duplication removal
+    products = Table({
+        "dataURI": ["mast:HST/product/test.fits"]
+    })
+    monkeypatch.setattr(
+        utils,
+        "remove_duplicate_products",
+        lambda table, key: Table(names=["dataURI"])
+    )
+
+    with pytest.warns(NoResultsWarning, match="No products to return urls for."):
+        result = Observations.get_product_urls(products)
+    assert result is None
+
+
+def test_observations_get_product_urls_cloud_fallback(monkeypatch):
+    Observations.enable_cloud_dataset()
+    products = Table({
+        "dataURI": [
+            "mast:JWST/product/test1.fits",
+            "mast:HST/product/test2.fits",
+        ]
+    })
+    test_s3_uri = "s3://bucket/test1.fits"
+
+    # check fallback to mast urls
+    monkeypatch.setattr(
+        Observations._cloud_connection,
+        "get_cloud_uri_list",
+        lambda *a, **k: [
+            test_s3_uri,
+            None,
+        ]
+    )
+
+    result = Observations.get_product_urls(products)
+    assert len(result) == 2
+    assert result[0] == test_s3_uri
+    assert result[1].startswith(
+        Observations._portal_api_connection.MAST_DOWNLOAD_URL
+    )
+
+    # checking cloud_only
+    result = Observations.get_product_urls(products, cloud_only=True)
+    assert len(result) == 1
+    assert result[0] == test_s3_uri
+
+    # check removal of duplicates
+    products = Table({
+        "dataURI": [
+            "mast:JWST/product/test1.fits",
+            "mast:HST/product/test2.fits",
+            "mast:JWST/product/test1.fits",
+        ]
+    })
+    result = Observations.get_product_urls(products)
+    assert len(result) == 2
+    assert result[0] == test_s3_uri
+
+
 #######################
 # CatalogsClass tests #
 #######################
