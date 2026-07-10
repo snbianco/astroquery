@@ -399,30 +399,6 @@ def test_missions_verify_mission():
         assert "Mission 'invalid' is not available" in str(err.value)
 
 
-def test_missions_get_available_missions():
-    # Access attribute
-    missions = MastMissions.available_missions
-    assert isinstance(missions, list)
-    assert len(missions) == 9
-
-    result = MastMissions.get_available_missions()
-    assert missions == result
-
-
-def test_missions_verify_mission():
-    MastMissions._verify_mission("hst")
-
-    # Invalid mission with a possible match
-    with pytest.raises(InvalidQueryError, match="Did you mean 'hst'?"):
-        MastMissions._verify_mission("hsp")
-
-    # Invalid mission with no match
-    with pytest.raises(InvalidQueryError) as err:
-        MastMissions._verify_mission("invalid")
-        assert "Did you mean" not in str(err.value)
-        assert "Mission 'invalid' is not available" in str(err.value)
-
-
 def test_missions_query_region_async():
     responses = MastMissions.query_region_async(regionCoords, radius=0.002, sci_pi_last_name='GORDON')
     assert isinstance(responses, MockResponse)
