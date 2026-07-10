@@ -26,7 +26,8 @@ from astropy.utils.decorators import deprecated_renamed_argument
 from requests import HTTPError, RequestException
 
 from astroquery import log
-from astroquery.exceptions import (AuthenticationWarning, InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning)
+from astroquery.exceptions import (AuthenticationWarning, InputWarning, InvalidQueryError,
+                                   MaxResultsWarning, NoResultsWarning)
 from astroquery.mast import utils
 from astroquery.mast.core import MastQueryWithLogin
 from astroquery.utils import async_to_sync, commons
