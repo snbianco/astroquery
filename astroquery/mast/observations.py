@@ -936,6 +936,29 @@ class ObservationsClass(MastQueryWithLogin):
         return manifest
 
     def _build_products_list(self, products, mrp_only=None, **filters):
+        """
+        Build list of data products.
+        Parameters
+        ----------
+        products : str, list, `~astropy.table.Table`
+            Either a single or list of obsids (as can be given to `get_product_list`),
+            a Table of products (as is returned by `get_product_list`), or a single or list of
+            URIs.
+        mrp_only : bool, optional
+            Default False. When set to true only "Minimum Recommended Products" will be returned.
+        **filters :
+            Filters to be applied.  Valid filters are all products fields returned by
+            ``get_metadata("products")`` and 'extension' which is the desired file extension.
+            The Column Name (or 'extension') is the keyword, with the argument being one or
+            more acceptable values for that parameter.
+            Filter behavior is AND between the filters and OR within a filter set.
+            For example: productType="SCIENCE",extension=["fits","jpg"]
+
+        Returns
+        -------
+        response : (Table, list[str])
+            Products table and products URIs list associated with the requested products.
+        """
         # If the products list is a row we need to cast it as a table
         if isinstance(products, Row):
             products = Table(products, masked=True)
@@ -1020,7 +1043,7 @@ class ObservationsClass(MastQueryWithLogin):
         # Ensure cloud access is enabled
         self._ensure_cloud_access()
 
-        # Get the products list
+        # Get the filtered table of products
         products, _ = self._build_products_list(products)
 
         # apply filters
@@ -1067,7 +1090,8 @@ class ObservationsClass(MastQueryWithLogin):
         ----------
         products : str, list, `~astropy.table.Table`
             Either a single or list of obsids (as can be given to `get_product_list`),
-            or a Table of products (as is returned by `get_product_list`)
+            a Table of products (as is returned by `get_product_list`), or a single or list of
+            URIs.
         mrp_only : bool, optional
             Default False. When set to true only "Minimum Recommended Products" will be returned.
         cloud_only : bool, optional
@@ -1109,7 +1133,7 @@ class ObservationsClass(MastQueryWithLogin):
                 "`include_bucket` must be False when `full_url=True`."
             )
 
-        # Get the products list
+        # Get the filtered products (if not raw URIs) and the URI list
         products, uri_list = self._build_products_list(products, mrp_only=mrp_only, **filters)
 
         if uri_list is None:

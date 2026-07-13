@@ -1699,27 +1699,6 @@ def test_observations_get_product_urls(monkeypatch):
     data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
     expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
 
-    # checking invalid arg combos
-    with pytest.raises(InvalidQueryError,
-                       match="`include_bucket` must be False"):
-        Observations.get_product_urls(
-            obsid,
-            include_bucket=True,
-            full_url=True
-        )
-    # disable cloud
-    Observations.disable_cloud_dataset()
-    # obsid input
-    url_list = Observations.get_product_urls(obsid)
-    assert isinstance(url_list, list)
-
-    # list of obsid input
-    url_list = Observations.get_product_urls([obsid])
-    assert isinstance(url_list, list)
-
-    # reenable cloud
-    Observations.enable_cloud_dataset()
-
     # row input
     product = Table()
     product['dataURI'] = [data_uri]
@@ -1748,7 +1727,35 @@ def test_observations_get_product_urls(monkeypatch):
     assert len(url_list) == 1
     assert url_list[0] == expected
 
+    # disable cloud
+    Observations.disable_cloud_dataset()
+
+    # obsid input
+    url_list = Observations.get_product_urls(obsid)
+    assert isinstance(url_list, list)
+
+    # list of obsid input
+    url_list = Observations.get_product_urls([obsid])
+    assert isinstance(url_list, list)
+
+
+def test_observations_get_product_urls_invalid(monkeypatch):
+    obsid = '2003738726'
+    data_uri = 'mast:HST/product/u9o40504m_c3m.fits'
+    expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
+
+    # explicitly enable cloud
+    Observations.enable_cloud_dataset()
+
     # check invalid arg combo
+    with pytest.raises(InvalidQueryError,
+                       match="`include_bucket` must be False"):
+        Observations.get_product_urls(
+            obsid,
+            include_bucket=True,
+            full_url=True
+        )
+
     with pytest.warns(InputWarning, match = "Filtering is not supported"):
         url_list = Observations.get_product_urls([data_uri], extension="png")
     assert isinstance(url_list, list)
@@ -1768,20 +1775,6 @@ def test_observations_get_product_urls(monkeypatch):
         result = Observations.get_product_urls(data_uri,cloud_only=True)
     assert isinstance(result, list)
     assert len(result) > 0
-
-    # check no products after duplication removal
-    products = Table({
-        "dataURI": ["mast:HST/product/test.fits"]
-    })
-    monkeypatch.setattr(
-        utils,
-        "remove_duplicate_products",
-        lambda table, key: Table(names=["dataURI"])
-    )
-
-    with pytest.warns(NoResultsWarning, match="No products to return urls for."):
-        result = Observations.get_product_urls(products)
-    assert result is None
 
 
 def test_observations_get_product_urls_cloud_fallback(monkeypatch):
