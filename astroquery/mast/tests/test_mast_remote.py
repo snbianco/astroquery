@@ -1094,51 +1094,46 @@ class TestMast:
         Observations.enable_cloud_dataset()
 
         # handling string obsid
-        products, uri_list = Observations._build_products_list(test_obs_id)
+        products = Observations._build_products_list(test_obs_id)
         assert isinstance(products, Table)
         assert all(products["obsID"] == test_obs_id)
-        assert not uri_list
 
         # handling list obsid
-        products, uri_list = Observations._build_products_list([test_obs_id])
+        products = Observations._build_products_list([test_obs_id])
         assert isinstance(products, Table)
         assert all(products["obsID"] == test_obs_id)
-        assert not uri_list
 
         # handling row
-        products, uri_list = Observations._build_products_list(msa_product_table[0])
+        products = Observations._build_products_list(msa_product_table[0])
         assert isinstance(products, Table)
         assert all(products["obsID"] == msa_product_table[0]["obsID"])
-        assert not uri_list
 
         # handling table
-        products, uri_list = Observations._build_products_list(msa_product_table)
+        products = Observations._build_products_list(msa_product_table)
         assert isinstance(products, Table)
         assert products["obsID"] in msa_product_table["obsID"]
-        assert not uri_list
 
         # handling URI input
-        products, uri_list = Observations._build_products_list(test_data_uri)
-        assert isinstance(products, list) and isinstance(uri_list, list)
-        assert len(uri_list) == 1
-        assert products == uri_list
+        products = Observations._build_products_list(test_data_uri)
+        assert isinstance(products, list)
+        assert len(products) == 1
+        assert products == products
 
         # handling URI list input
-        products, uri_list = Observations._build_products_list([test_data_uri])
-        assert isinstance(products, list) and isinstance(uri_list, list)
-        assert len(uri_list) == 1
-        assert products == uri_list
+        products = Observations._build_products_list([test_data_uri])
+        assert isinstance(products, list)
+        assert len(products) == 1
 
         # check invalid arg combo
         with pytest.warns(InputWarning, match = "Filtering is not supported"):
-            products, uri_list = Observations._build_products_list([test_data_uri], extension="png")
-        assert isinstance(products, list) and isinstance(uri_list, list)
-        assert len(uri_list) == 1
+            products = Observations._build_products_list([test_data_uri], extension="png")
+        assert isinstance(products, list)
+        assert len(products) == 1
 
         with pytest.warns(InputWarning, match = "Filtering is not supported"):
-            products, uri_list = Observations._build_products_list([test_data_uri], mrp=True)
-        assert isinstance(products, list) and isinstance(uri_list, list)
-        assert len(uri_list) == 1
+            products = Observations._build_products_list([test_data_uri], mrp=True)
+        assert isinstance(products, list) and isinstance(products, list)
+        assert len(products) == 1
 
     def test_observations_get_product_urls(self, msa_product_table):
         # Explicity disable cloud dataset

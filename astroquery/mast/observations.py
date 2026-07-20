@@ -937,7 +937,7 @@ class ObservationsClass(MastQueryWithLogin):
 
     def _build_products_list(self, products, mrp_only=None, **filters):
         """
-        Build list of data products.
+        Builds a list of data products.
         Parameters
         ----------
         products : str, list, `~astropy.table.Table`
@@ -963,18 +963,16 @@ class ObservationsClass(MastQueryWithLogin):
         if isinstance(products, Row):
             products = Table(products, masked=True)
 
-        uri_list = None
-
         # If the products list is not already a table of products we need to
         # get the products and filter them appropriately
         if not isinstance(products, Table):
 
+            # make every str a list
             if isinstance(products, str):
                 products = [products]
 
+            # every mast URI stays a list
             if all(str(item).startswith("mast:") for item in products):
-                uri_list = list(products)
-
                 if mrp_only or filters:
                     warnings.warn(
                         "Filtering is not supported when providing MAST URIs. "
@@ -989,7 +987,15 @@ class ObservationsClass(MastQueryWithLogin):
 
                 products = vstack(product_lists)
 
-        return products, uri_list
+        # for non-URI lists, filter the products and remove duplicates
+        if isinstance(products, Table):
+            # apply filters
+            products = self.filter_products(products, mrp_only=mrp_only, **filters)
+
+            # remove duplicate products
+            products = utils.remove_duplicate_products(products, 'dataURI')
+
+        return products
 
     def download_products(self, products, *, download_dir=None, flat=False,
                           cache=True, curl_flag=False, mrp_only=False, cloud_only=False, verbose=True,
@@ -1044,13 +1050,7 @@ class ObservationsClass(MastQueryWithLogin):
         self._ensure_cloud_access()
 
         # Get the filtered table of products
-        products, _ = self._build_products_list(products)
-
-        # apply filters
-        products = self.filter_products(products, mrp_only=mrp_only, **filters)
-
-        # remove duplicate products
-        products = utils.remove_duplicate_products(products, 'dataURI')
+        products = self._build_products_list(products, mrp_only=mrp_only, **filters)
 
         if not len(products):
             warnings.warn("No products to download.", NoResultsWarning)
@@ -1086,6 +1086,7 @@ class ObservationsClass(MastQueryWithLogin):
         Get URLs for data products.
         If cloud access is enabled, cloud locations will be returned. By default these are S3
         URIs. If `full_url=True`, downloadable URLs are returned instead.
+
         Parameters
         ----------
         products : str, list, `~astropy.table.Table`
@@ -1133,22 +1134,18 @@ class ObservationsClass(MastQueryWithLogin):
                 "`include_bucket` must be False when `full_url=True`."
             )
 
-        # Get the filtered products (if not raw URIs) and the URI list
-        products, uri_list = self._build_products_list(products, mrp_only=mrp_only, **filters)
+        # Get the filtered products table or URI list
+        products = self._build_products_list(products, mrp_only=mrp_only, **filters)
 
-        if uri_list is None:
-            # apply filters
-            products = self.filter_products(products, mrp_only=mrp_only, **filters)
-
-            # remove duplicate products
-            products = utils.remove_duplicate_products(products, 'dataURI')
-
+        if isinstance(products, Table):
             if not len(products):
                 warnings.warn("No products to return urls for.", NoResultsWarning)
                 return
 
             # parse out the uris and get cloud uris if cloud enabled
             uri_list = [url for url in products['dataURI']]
+        else:
+            uri_list = products
 
         base_url = self._portal_api_connection.MAST_DOWNLOAD_URL
         url_list = [f"{base_url}?uri={quote(uri, safe=':/')}" for uri in uri_list]

@@ -1644,54 +1644,50 @@ def test_observations_build_products_list(monkeypatch):
 
     # checking invalid arg combos
     with pytest.warns(InputWarning, match = "Filtering is not supported"):
-        products, uri_list = Observations._build_products_list([data_uri], extension="png")
-    assert isinstance(products, list) and isinstance(uri_list, list)
-    assert len(uri_list) == 1
+        products = Observations._build_products_list([data_uri], extension="png")
+    assert isinstance(products, list)
+    assert len(products) == 1
 
     with pytest.warns(InputWarning, match = "Filtering is not supported"):
-        products, uri_list = Observations._build_products_list([data_uri], mrp=True)
-    assert isinstance(products, list) and isinstance(uri_list, list)
-    assert len(uri_list) == 1
+        products = Observations._build_products_list([data_uri], mrp=True)
+    assert isinstance(products, list)
+    assert len(products) == 1
 
     # obsid input
-    products, uri_list = Observations._build_products_list(obsid)
+    products = Observations._build_products_list(obsid)
     assert isinstance(products, Table)
     assert all(products["obsID"] == obsid)
-    assert not uri_list
 
     # list of obsid input
-    products, uri_list = Observations._build_products_list([obsid])
+    products = Observations._build_products_list([obsid])
     assert isinstance(products, Table)
     assert all(products["obsID"] == obsid)
-    assert not uri_list
 
     # row input
     product = Table()
     product['dataURI'] = [data_uri]
-    products, uri_list = Observations._build_products_list(product[0])
+    products = Observations._build_products_list(product[0])
     assert isinstance(products, Table)
     assert all(product["dataURI"] == data_uri)
-    assert not uri_list
 
     # table input
     product = Table()
     product['dataURI'] = [data_uri]
-    products, uri_list = Observations._build_products_list(product)
+    products = Observations._build_products_list(product)
     assert isinstance(products, Table)
     assert all(products["dataURI"] == data_uri)
-    assert not uri_list
 
     # URI input
-    products, uri_list = Observations._build_products_list(data_uri)
-    assert isinstance(uri_list, list)
-    assert len(uri_list) == 1
-    assert uri_list[0] == data_uri
+    products = Observations._build_products_list(data_uri)
+    assert isinstance(products, list)
+    assert len(products) == 1
+    assert products[0] == data_uri
 
     # URI list input
-    products, uri_list = Observations._build_products_list([data_uri])
-    assert isinstance(uri_list, list)
-    assert len(uri_list) == 1
-    assert uri_list[0] == data_uri
+    products = Observations._build_products_list([data_uri])
+    assert isinstance(products, list)
+    assert len(products) == 1
+    assert products[0] == data_uri
 
 
 def test_observations_get_product_urls(monkeypatch):
