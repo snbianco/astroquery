@@ -987,13 +987,13 @@ class ObservationsClass(MastQueryWithLogin):
 
                 products = vstack(product_lists)
 
-        # for non-URI lists, filter the products and remove duplicates
+        # for non-URI lists, filter the products
         if isinstance(products, Table):
             # apply filters
             products = self.filter_products(products, mrp_only=mrp_only, **filters)
 
-            # remove duplicate products
-            products = utils.remove_duplicate_products(products, 'dataURI')
+        # remove duplicate products
+        products = utils.remove_duplicate_products(products, 'dataURI')
 
         return products
 
@@ -1046,6 +1046,7 @@ class ObservationsClass(MastQueryWithLogin):
         response : `~astropy.table.Table`
             The manifest of files downloaded, or status of files on disk if curl option chosen.
         """
+
         # Ensure cloud access is enabled
         self._ensure_cloud_access()
 
@@ -1081,7 +1082,7 @@ class ObservationsClass(MastQueryWithLogin):
         return manifest
 
     def get_product_urls(self, products, *, mrp_only=False, cloud_only=False, include_bucket=True,
-                 full_url=False, verbose=True, **filters):
+                         full_url=False, verbose=True, **filters):
         """
         Get URLs for data products.
         If cloud access is enabled, cloud locations will be returned. By default these are S3
@@ -1137,11 +1138,11 @@ class ObservationsClass(MastQueryWithLogin):
         # Get the filtered products table or URI list
         products = self._build_products_list(products, mrp_only=mrp_only, **filters)
 
-        if isinstance(products, Table):
-            if not len(products):
-                warnings.warn("No products to return urls for.", NoResultsWarning)
-                return
+        if not len(products):
+            warnings.warn("No products to return urls for.", NoResultsWarning)
+            return
 
+        if isinstance(products, Table):
             # parse out the uris and get cloud uris if cloud enabled
             uri_list = [url for url in products['dataURI']]
         else:
@@ -1162,7 +1163,8 @@ class ObservationsClass(MastQueryWithLogin):
             if cloud_only:
                 url_list = [uri for uri in cloud_uris if uri is not None]
             else:
-                url_list = [cloud_uri if cloud_uri is not None
+                url_list = [
+                    cloud_uri if cloud_uri is not None
                     else url for cloud_uri, url in zip(cloud_uris, url_list)
                 ]
 

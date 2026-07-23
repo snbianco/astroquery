@@ -1125,12 +1125,12 @@ class TestMast:
         assert len(products) == 1
 
         # check invalid arg combo
-        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        with pytest.warns(InputWarning, match="Filtering is not supported"):
             products = Observations._build_products_list([test_data_uri], extension="png")
         assert isinstance(products, list)
         assert len(products) == 1
 
-        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        with pytest.warns(InputWarning, match="Filtering is not supported"):
             products = Observations._build_products_list([test_data_uri], mrp=True)
         assert isinstance(products, list) and isinstance(products, list)
         assert len(products) == 1
@@ -1163,7 +1163,7 @@ class TestMast:
         assert isinstance(url_list, list)
 
         # checking inavlid param combo
-        with pytest.raises(InvalidQueryError, match = "`include_bucket` must be False"):
+        with pytest.raises(InvalidQueryError, match="`include_bucket` must be False"):
             url_list = Observations.get_product_urls(
                 test_obs_id,
                 include_bucket=True,
@@ -1171,7 +1171,7 @@ class TestMast:
             )
 
         # checking inavlid param combo
-        with pytest.raises(InvalidQueryError, match = "`include_bucket` must be False"):
+        with pytest.raises(InvalidQueryError, match="`include_bucket` must be False"):
             url_list = Observations.get_product_urls(
                 test_obs_id,
                 include_bucket=True,
@@ -1184,6 +1184,17 @@ class TestMast:
         assert len(products) == 6
 
         url_list = Observations.get_product_urls(products)
+        assert len(url_list) == 1
+
+        # Check that an INFO message about duplicates was logged
+        with caplog.at_level("INFO", logger="astroquery"):
+            assert "products were duplicates" in caplog.text
+
+        # ensure removal of duplicates
+        test_data_uris = ['mast:HST/product/u9o40504m_c3m.fits' for x in range(4)]
+        assert len(test_data_uris) == 4
+
+        url_list = Observations.get_product_urls(test_data_uris)
         assert len(url_list) == 1
 
         # Check that an INFO message about duplicates was logged
@@ -1218,33 +1229,33 @@ class TestMast:
         assert url_list[0] == expected
 
         # check invalid arg combo
-        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        with pytest.warns(InputWarning, match="Filtering is not supported"):
             url_list = Observations.get_product_urls([test_data_uri], extension="png")
         assert isinstance(url_list, list)
         assert len(url_list) == 1
         assert url_list[0] == expected
 
-        with pytest.warns(InputWarning, match = "Filtering is not supported"):
+        with pytest.warns(InputWarning, match="Filtering is not supported"):
             url_list = Observations.get_product_urls([test_data_uri], mrp=True)
         assert isinstance(url_list, list)
         assert len(url_list) == 1
         assert url_list[0] == expected
 
         # second product (None) should have been stripped from list
-        with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+        with pytest.warns(NoResultsWarning, match="Failed to retrieve cloud path"):
             result = Observations.get_product_urls(msa_product_table, cloud_only=True)
         assert isinstance(result, list)
         assert len(result) == 1
 
         # Should fall back and get mast url if cloud_only is False
-        with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+        with pytest.warns(NoResultsWarning, match="Failed to retrieve cloud path"):
             result = Observations.get_product_urls(msa_product_table)
         assert isinstance(result, list)
         assert len(result) == 2
         assert result[1].startswith("http")
 
         # confirm full urls
-        with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+        with pytest.warns(NoResultsWarning, match="Failed to retrieve cloud path"):
             result = Observations.get_product_urls(msa_product_table, include_bucket=False, full_url=True)
         assert isinstance(result, list)
         assert len(result) == 2
