@@ -938,6 +938,7 @@ class ObservationsClass(MastQueryWithLogin):
     def _build_products_list(self, products, mrp_only=None, **filters):
         """
         Builds a list of data products.
+
         Parameters
         ----------
         products : str, list, `~astropy.table.Table`
@@ -1095,11 +1096,11 @@ class ObservationsClass(MastQueryWithLogin):
             a Table of products (as is returned by `get_product_list`), or a single or list of
             URIs.
         mrp_only : bool, optional
-            Default False. When set to true only "Minimum Recommended Products" will be returned.
+            Default False. When set to True only "Minimum Recommended Products" will be returned.
         cloud_only : bool, optional
             Default False. If set to True and cloud data access is enabled (see `enable_cloud_dataset`)
             files that are not found in the cloud will be skipped rather than returned in the list
-            as is the default behavior. If cloud access is not enabled this argument as no affect.
+            as is the default behavior. If cloud access is not enabled this argument has no effect.
         include_bucket : bool
             Default True. When False, returns the path of the file relative to the
             top level cloud storage location.
