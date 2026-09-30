@@ -51,7 +51,7 @@ docs = [
    # https://github.com/astropy/astroquery/issues/3102
    "sphinx-automodapi",
    "matplotlib",
-   "sphinx-astropy>=1.5",
+   "sphinx-astropy[confv3]>=1.11",
    "scipy",
    "fsspec[http]",
 ]
@@ -196,6 +196,10 @@ exclude = [
   "version.py",
   "astroquery/template_module",
   "astroquery/simbad/criteria_*.py",
+]
+per-file-ignores = [
+  # ISO table is hand-aligned for readability; keep the padding whitespace
+  "astroquery/hitran/core.py: E201, E202, E241, W291",
 ]
 
 [tool.black]
