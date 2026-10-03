@@ -20,14 +20,14 @@ from astropy.utils.exceptions import AstropyDeprecationWarning
 from requests import HTTPError, Response
 
 from astroquery.exceptions import (AuthenticationWarning, BlankResponseWarning, InputWarning, InvalidQueryError,
-                                   MaxResultsWarning, NoResultsWarning, RemoteServiceError, ResolverError)
+                                   LargeQueryWarning, MaxResultsWarning, NoResultsWarning, RemoteServiceError,
+                                   ResolverError)
 from astroquery.mast import (Catalogs, MastMissions, Observations, Tesscut, Zcut, Mast, utils, services,
                              discovery_portal, auth, core, cloud)
 from astroquery.mast.cloud import CloudAccess
 from astroquery.mast import missions as missions_module
 from astroquery.mast.cutouts import _parse_cutout_size
 from astroquery.utils.mocks import MockResponse
-from astroquery.exceptions import (LargeQueryWarning)
 
 try:
     # Optional dependency import for cloud access functionality
