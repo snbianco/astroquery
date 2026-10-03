@@ -326,10 +326,13 @@ def vo_tap_mock():
         elif 'tap_schema.tables' in query:
             # Queries to get catalogs
             filename = data_path(DATA_FILES['tap_catalogs'])
+            catalog_table = parse(filename).get_first_table().to_table()
+            catalog_table.add_row(["dbo.catalogrecord2", "Second catalog for crossmatch tests"])
+            return TAPResults(from_table(catalog_table))
         elif 'tap_schema.columns' in query:
             # Queries to get column metadata
             filename = data_path(DATA_FILES['tap_columns'])
-        elif 'WHERE' in query:
+        elif 'WHERE' in query or 'JOIN' in query:
             # Queries with results, keep in mind this is not meaningful and results won't match the query
             filename = data_path(DATA_FILES['tap_results'])
         votable = parse(filename)
@@ -1687,6 +1690,158 @@ def test_catalogs_invalid_query_criteria(patch_tap):
             collection="tic",
             objtype="empty"
         )
+
+
+def test_catalogs_crossmatch(patch_tap):
+    def crossmatch_tic_pair(**kwargs):
+        kwargs.pop("collection1", None)
+        kwargs.pop("collection2", None)
+        kwargs.setdefault("catalog1", "dbo.CatalogRecord")
+        kwargs.setdefault("catalog2", "dbo.CatalogRecord2")
+        return Catalogs.crossmatch(collection1="tic", collection2="tic", **kwargs)
+
+    # Distinct catalog names share the test fixture's TAP endpoint and metadata.
+    with pytest.warns(InputWarning, match="has not been verified to support crossmatching"):
+        result = crossmatch_tic_pair(
+            coordinates=regionCoords,
+            radius=0.002 * u.deg,
+            match_radius=3 * u.arcsec,
+            limit=2,
+        )
+
+    assert isinstance(result, Table)
+    assert len(result) > 0
+    query = get_patch_tap_query(patch_tap)
+    assert "TOP 2" in query
+    assert "FROM (SELECT * FROM dbo.catalogrecord WHERE CONTAINS" in query
+    assert "JOIN dbo.catalogrecord2 AS tic_2" in query
+    assert "DISTANCE(POINT('ICRS', tic_1.ra, tic_1.dec), POINT('ICRS', tic_2.ra, tic_2.dec)) <" in query
+    assert "adql_query" in result.meta
+    assert result.meta["collection1"] == "tic"
+    assert result.meta["collection2"] == "tic"
+
+    # If one catalog is omitted, the instance's current catalog supplies it.
+    tic_catalogs = Catalogs("tic")
+    with pytest.warns(InputWarning):
+        result = tic_catalogs.crossmatch(
+            collection1="tic",
+            catalog1="dbo.CatalogRecord2",
+            coordinates=regionCoords,
+        )
+    assert result.meta["collection1"] == "tic"
+    assert result.meta["collection2"] == tic_catalogs.collection
+    assert result.meta["catalog2"] == tic_catalogs.catalog
+
+    # Return ADQL only
+    with pytest.warns(InputWarning):
+        adql = crossmatch_tic_pair(
+            coordinates=regionCoords,
+            return_adql=True,
+        )
+    assert isinstance(adql, str)
+    assert "JOIN dbo.catalogrecord2 AS tic_2" in adql
+
+    # Count only
+    with pytest.warns(InputWarning):
+        count = crossmatch_tic_pair(
+            coordinates=regionCoords,
+            count_only=True,
+        )
+    assert isinstance(count, int)
+
+    # Alias-qualified select_cols and sort_by
+    with pytest.warns(InputWarning):
+        result = crossmatch_tic_pair(
+            coordinates=regionCoords,
+            select_cols=["tic_1.ra", "tic_2.dec"],
+            sort_by="tic_1.ra",
+        )
+    query = get_patch_tap_query(patch_tap)
+    assert "SELECT TOP" in query
+    assert "tic_1.ra, tic_2.dec" in query
+    assert "ORDER BY tic_1.ra ASC" in query
+
+    # Alias-qualified select_cols and filters.
+    with pytest.warns(InputWarning):
+        result = crossmatch_tic_pair(
+            coordinates=regionCoords,
+            select_cols=["tic_1.bmag"],
+            **{"tic_2.objtype": "STAR"},
+        )
+    query = get_patch_tap_query(patch_tap)
+    assert "tic_1.bmag" in query
+    assert "tic_2.objtype = 'STAR'" in query
+
+    # No spatial constraint, but criteria given: no "unconstrained" warning, no CONTAINS subquery
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        result = crossmatch_tic_pair(
+            **{"tic_1.objtype": "STAR"},
+        )
+        messages = [str(w.message) for w in record]
+        assert any("has not been verified to support crossmatching" in m for m in messages)
+        assert not any("may be slow or time out" in m for m in messages)
+    query = get_patch_tap_query(patch_tap)
+    assert "FROM dbo.catalogrecord AS tic_1" in query
+    assert "CONTAINS" not in query
+
+    # No spatial constraint and no criteria: warns that the query is unconstrained
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        crossmatch_tic_pair()
+        messages = [str(w.message) for w in record]
+        assert any("may be slow or time out" in m for m in messages)
+
+
+def test_catalogs_invalid_crossmatch(patch_tap):
+    def crossmatch_tic_pair(**kwargs):
+        kwargs.pop("collection1", None)
+        kwargs.pop("collection2", None)
+        kwargs.setdefault("catalog1", "dbo.CatalogRecord")
+        kwargs.setdefault("catalog2", "dbo.CatalogRecord2")
+        return Catalogs.crossmatch(collection1="tic", collection2="tic", **kwargs)
+
+    # Reject the same fully qualified table, even if the identifiers differ only in case.
+    with pytest.raises(InvalidQueryError, match="with itself"):
+        Catalogs.crossmatch(
+            collection1="tic",
+            catalog1="dbo.CatalogRecord",
+            collection2="tic",
+            catalog2="DBO.CATALOGRECORD",
+            coordinates=regionCoords,
+        )
+
+    # Catalogs from different TAP endpoints cannot be crossmatched
+    with pytest.raises(InvalidQueryError, match="served by different"):
+        Catalogs.crossmatch(
+            collection1="tic",
+            collection2="hsc",
+            coordinates=regionCoords,
+        )
+
+    # Ambiguous select_cols must be qualified
+    with pytest.raises(InvalidQueryError, match="exists in both catalogs"):
+        with pytest.warns(InputWarning):
+            crossmatch_tic_pair(
+                coordinates=regionCoords,
+                select_cols=["ra"],
+            )
+
+    # Ambiguous criteria must be qualified
+    with pytest.raises(InvalidQueryError, match="exists in both catalogs"):
+        with pytest.warns(InputWarning):
+            crossmatch_tic_pair(
+                coordinates=regionCoords,
+                ra=5,
+            )
+
+    # Unrecognized table alias
+    with pytest.raises(InvalidQueryError, match="Unrecognized table alias"):
+        with pytest.warns(InputWarning):
+            crossmatch_tic_pair(
+                coordinates=regionCoords,
+                select_cols=["nope.ra"],
+            )
 
 
 def test_catalogs_query_region(patch_tap):

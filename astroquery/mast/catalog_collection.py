@@ -9,7 +9,7 @@ from .. import log
 from ..exceptions import InvalidQueryError
 from . import conf, utils
 
-__all__ = ["CatalogCollection"]
+__all__ = ["CatalogCollection", "KNOWN_CROSSMATCH_PAIRS"]
 
 DEFAULT_CATALOGS = {
     "caom": "dbo.obspointing",
@@ -32,6 +32,14 @@ DEFAULT_CATALOGS = {
 }
 
 GROUPED_COLLECTION_ENDPOINTS = ["mast_catalogs", "roman_catalogs"]
+
+# Catalog pairs (fully-qualified table names) that are known to support crossmatching via
+# an ADQL JOIN. This is not an exhaustive list of every combination that may work -- any two
+# catalogs served by the same grouped TAP endpoint with RA/Dec columns can be attempted -- but
+# these pairs have been verified. Used to emit a warning for unverified combinations.
+KNOWN_CROSSMATCH_PAIRS = {
+    frozenset({"gaiadr3.gaia_source", "tic_v82.source"}),
+}
 
 
 @dataclass

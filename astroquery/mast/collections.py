@@ -24,7 +24,7 @@ from ..exceptions import InputWarning, InvalidQueryError, NoResultsWarning
 from ..utils import async_to_sync
 from ..utils.class_or_instance import class_or_instance
 from . import conf, utils
-from .catalog_collection import CatalogCollection
+from .catalog_collection import KNOWN_CROSSMATCH_PAIRS, CatalogCollection
 from .core import MastQueryWithLogin
 
 try:
@@ -736,6 +736,246 @@ class CatalogsClass(MastQueryWithLogin):
         )
 
     @class_or_instance
+    def crossmatch(
+        self,
+        collection1=None,
+        catalog1=None,
+        collection2=None,
+        catalog2=None,
+        *,
+        coordinates=None,
+        region=None,
+        object_name=None,
+        radius=0.2 * u.deg,
+        match_radius=3 * u.arcsec,
+        resolver=None,
+        limit=5000,
+        offset=0,
+        count_only=False,
+        select_cols=None,
+        sort_by=None,
+        sort_desc=False,
+        filters=None,
+        run_async=False,
+        return_adql=False,
+        **criteria,
+    ):
+        """
+        Crossmatch two MAST catalogs on sky position within a region. Only catalogs served by the same
+        grouped TAP endpoint (e.g. ``mast_catalogs``) can be crossmatched, since the crossmatch is
+        performed as a single ADQL JOIN query.
+
+        Parameters
+        ----------
+        collection1 : str, optional
+            The collection of the first catalog to crossmatch. If None, uses the instance's `collection`
+            attribute.
+        catalog1 : str, optional
+            The first catalog to crossmatch. If None, uses the default catalog for ``collection1`` (or the
+            instance's `catalog` attribute if ``collection1`` is also None).
+        collection2 : str, optional
+            The collection of the second catalog to crossmatch. If None, uses the instance's `collection`
+            attribute.
+        catalog2 : str, optional
+            The second catalog to crossmatch, resolved the same way as ``catalog1``.
+        coordinates : str or `~astropy.coordinates` object, optional
+            The target around which to search. It may be specified as a string (e.g., '350 -80') or as an
+            Astropy coordinates object. None of ``coordinates``, ``region``, or ``object_name`` are required;
+            if none are given, the crossmatch runs against the full extent of both catalogs (subject to
+            ``filters``/``**criteria``), which may be slow.
+        region : str | iterable | `~regions.CircleSkyRegion` | `~regions.PolygonSkyRegion`, optional
+            The region to search within. It may be specified as a STC-S POLYGON or CIRCLE string
+            (e.g., 'CIRCLE 350 -80 0.2'), an iterable of coordinate pairs, or as an
+            `~regions.CircleSkyRegion` or `~regions.PolygonSkyRegion`.
+        object_name : str, optional
+            The name of the object to resolve and search around.
+        radius : str or `~astropy.units.Quantity` object, optional
+            The search radius around the target coordinates or object used to select rows from the first
+            catalog. Only used if ``coordinates``, ``region``, or ``object_name`` is given. Default 0.2 degrees.
+        match_radius : str or `~astropy.units.Quantity` object, optional
+            The maximum separation allowed between a row in the first catalog and a row in the second catalog
+            for them to be considered a match. Default 3 arcsec.
+        resolver : str, optional
+            The name resolver service to use when resolving ``object_name``.
+        limit : int, optional
+            The maximum number of results to return. Default is 5000.
+        offset : int, optional
+            The number of rows to skip before starting to return rows. Default is 0.
+        count_only : bool, optional
+            If True, only return the count of matching records instead of the records themselves. Default is False.
+        select_cols : list of str, optional
+            List of column names to include in the result. If a column name exists in both catalogs, it must
+            be qualified with the owning collection name (e.g. ``'gaiadr3.ra'``). If None or empty, all columns
+            from both catalogs are returned.
+        sort_by : str or list of str, optional
+            Column name(s) to sort the results by. Ambiguous column names must be qualified as in ``select_cols``.
+        sort_desc : bool or list of bool, optional
+            Indicates whether to sort in descending order for each column in ``sort_by``. If a single bool,
+            applies to all columns. If a list, must match length of ``sort_by``. Default is False (ascending order).
+        filters : dict, optional
+            Another parameter to specify criteria filters as a dictionary. Use this option when the name of a column
+            conflicts with a named parameter of this method.
+        run_async : bool, optional
+            If True, run the query in asynchronous mode. This mode is more robust and preferable
+            for long-running queries. Default is False (synchronous mode).
+        return_adql : bool, optional
+            If True, return the ADQL query string instead of executing the query. Default is False.
+        **criteria
+            Keyword arguments representing criteria filters to apply. Ambiguous column names must be qualified
+            with the owning collection name (e.g. ``tic_v82__bmag=10`` is not valid; use ``filters`` with
+            ``{'tic_v82.bmag': 10}`` instead).
+
+        Returns
+        -------
+        response : `~astropy.table.Table`
+            A table containing the crossmatched query results.
+        """
+        # Any catalog left unspecified falls back to the instance's current collection/catalog
+        collection1_obj, catalog1 = self._parse_inputs(collection1, catalog1)
+        collection2_obj, catalog2 = self._parse_inputs(collection2, catalog2)
+
+        if collection1_obj.parent_collection != collection2_obj.parent_collection:
+            raise InvalidQueryError(
+                f"Cannot crossmatch '{collection1_obj.name}' and '{collection2_obj.name}': they are served by "
+                f"different TAP endpoints ('{collection1_obj.parent_collection}' and "
+                f"'{collection2_obj.parent_collection}'). Only catalogs served by the same TAP endpoint "
+                "can be crossmatched."
+            )
+
+        if catalog1.strip().casefold() == catalog2.strip().casefold():
+            raise InvalidQueryError(
+                f"Cannot crossmatch catalog '{catalog1}' with itself. Choose two different catalogs."
+            )
+
+        meta1 = collection1_obj.get_catalog_metadata(catalog1)
+        meta2 = collection2_obj.get_catalog_metadata(catalog2)
+
+        if not (meta1.ra_column and meta1.dec_column and meta2.ra_column and meta2.dec_column):
+            raise InvalidQueryError(
+                f"Both '{catalog1}' and '{catalog2}' must have identifiable RA/Dec columns to be crossmatched."
+            )
+
+        pair_key = frozenset({catalog1.lower(), catalog2.lower()})
+        if pair_key not in KNOWN_CROSSMATCH_PAIRS:
+            warnings.warn(
+                f"The combination of '{catalog1}' and '{catalog2}' has not been verified to support "
+                "crossmatching. The query may fail or return unexpected results.",
+                InputWarning,
+            )
+
+        # Aliases used to qualify ambiguous column names in the JOIN
+        alias1 = collection1_obj.name
+        alias2 = collection2_obj.name
+        if alias1 == alias2:
+            alias1, alias2 = f"{alias1}_1", f"{alias2}_2"
+
+        cols1 = {c.lower() for c in meta1.column_metadata["column_name"]}
+        cols2 = {c.lower() for c in meta2.column_metadata["column_name"]}
+
+        # Check for conflicts between named parameters and filters dict
+        if criteria and filters:
+            overlap = set(k.lower() for k in criteria) & set(k.lower() for k in filters)
+            if overlap:
+                raise InvalidQueryError(
+                    f"Criteria specified both as keyword arguments and in 'filters' for columns: "
+                    f"{', '.join(sorted(overlap))}"
+                )
+
+        search_criteria = {}
+        search_criteria.update(criteria)
+        if filters:
+            search_criteria.update(filters)
+
+        alias_kwargs = dict(
+            collection1_obj=collection1_obj,
+            catalog1=catalog1,
+            collection2_obj=collection2_obj,
+            catalog2=catalog2,
+            alias1=alias1,
+            alias2=alias2,
+            cols1=cols1,
+            cols2=cols2,
+        )
+
+        columns = "*" if not select_cols else self._parse_crossmatch_select_cols(select_cols, **alias_kwargs)
+
+        adql_region = ""
+        if region:
+            adql_region = self._create_adql_region(region)
+        elif object_name or coordinates:
+            coordinates = utils.parse_input_location(coordinates=coordinates, object_name=object_name,
+                                                     resolver=resolver)
+            radius = coord.Angle(radius, u.deg)
+            adql_region = f"CIRCLE('ICRS', {coordinates.ra.deg}, {coordinates.dec.deg}, {radius.to(u.deg).value})"
+        elif not search_criteria:
+            warnings.warn(
+                "No `region`, `coordinates`, `object_name`, or criteria were specified. This crossmatch will "
+                "run against the entirety of both catalogs and may be slow or time out.",
+                InputWarning,
+            )
+
+        ra1, dec1 = meta1.ra_column, meta1.dec_column
+        ra2, dec2 = meta2.ra_column, meta2.dec_column
+        match_radius_deg = coord.Angle(match_radius, u.deg).to(u.deg).value
+
+        select_clause = "COUNT(*) AS count_all" if count_only else columns
+        adql = f"SELECT TOP {1 if count_only else limit} {select_clause} "
+        if adql_region:
+            adql += (
+                f"FROM (SELECT * FROM {catalog1} WHERE "
+                f"CONTAINS(POINT('ICRS', {ra1}, {dec1}), {adql_region}) = 1) AS {alias1} "
+            )
+        else:
+            adql += f"FROM {catalog1} AS {alias1} "
+        adql += f"JOIN {catalog2} AS {alias2} "
+        adql += (
+            f"ON DISTANCE(POINT('ICRS', {alias1}.{ra1}, {alias1}.{dec1}), "
+            f"POINT('ICRS', {alias2}.{ra2}, {alias2}.{dec2})) < {match_radius_deg} "
+        )
+
+        if search_criteria:
+            conditions = self._format_crossmatch_criteria(search_criteria, **alias_kwargs)
+            if conditions:
+                adql += "AND " + " AND ".join(conditions) + " "
+
+        if sort_by:
+            sort_by = [sort_by] if isinstance(sort_by, str) else list(sort_by)
+            sort_by = [self._qualify_crossmatch_column(col, **alias_kwargs) for col in sort_by]
+
+            if isinstance(sort_desc, bool):
+                sort_desc = [sort_desc]
+            if len(sort_desc) not in (1, len(sort_by)):
+                raise InvalidQueryError("Length of 'sort_desc' must be 1 or equal to length of 'sort_by'.")
+            if len(sort_desc) == 1:
+                sort_desc = sort_desc * len(sort_by)
+
+            order_parts = [f"{col} {'DESC' if desc else 'ASC'}" for col, desc in zip(sort_by, sort_desc)]
+            adql += "ORDER BY " + ", ".join(order_parts) + " "
+
+        if offset:
+            adql += f"OFFSET {offset}"
+
+        if return_adql:
+            return adql.strip()
+
+        # Both catalogs are served by the same TAP endpoint, so either can be used to run the query
+        result_table = collection1_obj.run_tap_query(adql, run_async=run_async)
+
+        result_table.meta["adql_query"] = adql.strip()
+
+        if len(result_table) == 0:
+            warnings.warn("The query returned no results.", NoResultsWarning)
+
+        if count_only:
+            return int(result_table["count_all"][0])
+        else:
+            result_table.meta["collection1"] = collection1_obj.name
+            result_table.meta["catalog1"] = catalog1
+            result_table.meta["collection2"] = collection2_obj.name
+            result_table.meta["catalog2"] = catalog2
+        return result_table
+
+    @class_or_instance
     @deprecated(since="v0.4.13", message=("This function is deprecated and will be removed in a future release."))
     def query_hsc_matchid_async(self, match, *, version=3, pagesize=None, page=None):
         """
@@ -1043,6 +1283,128 @@ class CatalogsClass(MastQueryWithLogin):
         if not valid_selected:
             raise InvalidQueryError("No valid columns specified in `select_cols`.")
         return ", ".join(valid_selected)
+
+    def _qualify_crossmatch_column(self, col, *, alias1, alias2, cols1, cols2, **kwargs):
+        """
+        Qualify a column name referenced in a `crossmatch` query with the appropriate table alias.
+
+        Parameters
+        ----------
+        col : str
+            The column name, optionally already qualified as ``'alias.column'``.
+        alias1 : str
+            The ADQL table alias for the first catalog.
+        alias2 : str
+            The ADQL table alias for the second catalog.
+        cols1 : set of str
+            Lowercased column names belonging to the first catalog.
+        cols2 : set of str
+            Lowercased column names belonging to the second catalog.
+
+        Returns
+        -------
+        str
+            The column name qualified with its owning table alias (e.g. ``'gaiadr3.ra'``).
+        """
+        if "." in col:
+            alias, name = (part.strip() for part in col.split(".", 1))
+            if alias not in (alias1, alias2):
+                raise InvalidQueryError(
+                    f"Unrecognized table alias '{alias}' in column '{col}'. "
+                    f"Use '{alias1}' or '{alias2}'."
+                )
+            return f"{alias}.{name}"
+
+        lc = col.lower()
+        in_1 = lc in cols1
+        in_2 = lc in cols2
+        if in_1 and in_2:
+            raise InvalidQueryError(
+                f"Column '{col}' exists in both catalogs and must be qualified with a table alias, "
+                f"e.g. '{alias1}.{col}' or '{alias2}.{col}'."
+            )
+        if in_1:
+            return f"{alias1}.{col}"
+        if in_2:
+            return f"{alias2}.{col}"
+        raise InvalidQueryError(f"Column '{col}' was not found in either '{alias1}' or '{alias2}'.")
+
+    def _parse_crossmatch_select_cols(self, select_cols, **alias_kwargs):
+        """
+        Validate and qualify the select_cols parameter for a `crossmatch` query.
+
+        Parameters
+        ----------
+        select_cols : list of str
+            List of column names to include in the result.
+        **alias_kwargs
+            Keyword arguments accepted by `_qualify_crossmatch_column`.
+
+        Returns
+        -------
+        str
+            Comma-separated string of alias-qualified column names for the ADQL SELECT clause.
+        """
+        return ", ".join(self._qualify_crossmatch_column(col, **alias_kwargs) for col in select_cols)
+
+    def _format_crossmatch_criteria(
+        self, criteria, *, collection1_obj, catalog1, collection2_obj, catalog2, alias1, alias2,
+        cols1, cols2,
+    ):
+        """
+        Turn a `crossmatch` criteria dict into alias-qualified ADQL WHERE clause expressions.
+
+        Parameters
+        ----------
+        criteria : dict
+            Mapping of column name (optionally alias-qualified) to scalar or list of scalars.
+        collection1_obj, collection2_obj : CatalogCollection
+            The collection objects for the first and second catalogs.
+        catalog1, catalog2 : str
+            The catalog names for the first and second catalogs.
+        alias1, alias2 : str
+            The ADQL table aliases for the first and second catalogs.
+        cols1, cols2 : set of str
+            Lowercased column names belonging to each catalog.
+
+        Returns
+        -------
+        list of str
+            ADQL predicate strings, alias-qualified and suitable for joining with ' AND '.
+        """
+        conditions = []
+        for raw_key, value in criteria.items():
+            alias = None
+            key = raw_key
+            if "." in raw_key:
+                alias, key = (part.strip() for part in raw_key.split(".", 1))
+                if alias not in (alias1, alias2):
+                    raise InvalidQueryError(
+                        f"Unrecognized table alias '{alias}' in criteria column '{raw_key}'. "
+                        f"Use '{alias1}' or '{alias2}'."
+                    )
+
+            lc = key.lower()
+            in_1 = lc in cols1
+            in_2 = lc in cols2
+            if alias is None:
+                if in_1 and in_2:
+                    raise InvalidQueryError(
+                        f"Criteria column '{raw_key}' exists in both catalogs and must be qualified with a table "
+                        f"alias, e.g. '{alias1}.{key}' or '{alias2}.{key}'."
+                    )
+                alias = alias1 if in_1 else alias2 if in_2 else None
+            elif (alias == alias1 and not in_1) or (alias == alias2 and not in_2):
+                raise InvalidQueryError(f"Criteria column '{raw_key}' was not found in catalog '{alias}'.")
+
+            if alias is None:
+                raise InvalidQueryError(f"Criteria column '{raw_key}' was not found in either catalog.")
+
+            target_obj, target_catalog = (collection1_obj, catalog1) if alias == alias1 else (collection2_obj, catalog2)
+            raw_conditions = self._format_criteria_conditions(target_obj, target_catalog, {key: value})
+            pattern = re.compile(rf"\b{re.escape(key)}\b")
+            conditions.extend(pattern.sub(f"{alias}.{key}", cond) for cond in raw_conditions)
+        return conditions
 
     def _parse_legacy_pagination(self, limit, offset, pagesize, page):
         """
