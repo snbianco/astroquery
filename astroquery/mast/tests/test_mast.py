@@ -523,7 +523,7 @@ def test_missions_parse_select_cols():
 
     # Warn with a suggestion for a misspelled column.
     with pytest.warns(InputWarning, match='Did you mean "sci_instrume"'):
-        suggested_cols = MastMissions._parse_select_cols(['sci_instrum'])
+        suggested_cols = MastMissions._parse_select_cols(['sci_instrum'], mission='hst')
     assert 'sci_instrume' not in suggested_cols
 
     # Workaround for Ullyses mission default columns
