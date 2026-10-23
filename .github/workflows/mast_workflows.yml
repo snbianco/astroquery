@@ -1,4 +1,4 @@
-name: Notify Slack on mast-beta-release push
+name: On mast-beta-release push
 
 on:
   push:
@@ -8,14 +8,69 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
-
     steps:
       - name: Send Slack notification
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+          ACTOR: ${{ github.actor }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
         run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{
-            \"text\": \":warning: A push was made to *mast-beta-release* by *${{ github.actor }}*.\n\nPlease verify that the MAST beta release documentation and feature table are up to date.\n\nCommit: ${{ github.event.head_commit.message }}\nhttps://github.com/${{ github.repository }}/commit/${{ github.sha }}\"
-          }" \
-          "$SLACK_WEBHOOK_URL"
+          payload=$(jq -n \
+            --arg actor "$ACTOR" \
+            --arg message "$COMMIT_MESSAGE" \
+            --arg url "$COMMIT_URL" \
+            '{text: (":warning: A push was made to *mast-beta-release* by *" + $actor + "*.\n\nPlease verify that the MAST beta release documentation and feature table are up to date.\n\nCommit: " + $message + "\n" + $url)}')
+          curl --fail-with-body --silent --show-error \
+            -X POST -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_WEBHOOK_URL"
+
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tox
+
+      - name: Build Sphinx HTML documentation
+        run: |
+          tox -e build_mast_docs
+
+      - name: Prepare GitHub Pages site root
+        run: |
+          printf '%s\n' '<!doctype html>' '<html lang="en">' '<meta charset="utf-8">' '<meta http-equiv="refresh" content="0; url=mast/mast.html">' '<title>MAST documentation</title>' '<a href="mast/mast.html">MAST documentation</a>' '</html>' > ./docs/_build/mast/index.html
+          touch ./docs/_build/mast/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./docs/_build/mast
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
