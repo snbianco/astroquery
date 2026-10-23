@@ -674,7 +674,7 @@ class MastMissionsClass(MastQueryWithLogin):
         mission = mission.lower() if mission else self.mission
         self._verify_mission(mission)
 
-        if mission in ['hst', 'jwst', 'roman', 'roman_spectra', 'roman_cgi', 'tess', 'hsla']:
+        if current_mission in ['hst', 'jwst', 'roman', 'roman_wfi', 'roman_spectra', 'roman_cgi', 'tess', 'hsla']:
             # Certain missions have a dedicated endpoint for retrieving products
             base_url = (f"{self._service_api_connection.MISSIONS_URL}{mission}"
                         "/api/v0.1/retrieve_product")
