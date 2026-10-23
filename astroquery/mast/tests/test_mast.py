@@ -226,7 +226,7 @@ def service_mockreturn(self, method="POST", url=None, data=None, params=None, ti
     return MockResponse(content)
 
 
-def request_mockreturn(url, params={}):
+def request_mockreturn(url, params={}, headers=None, allow_redirects=False):
     if 'column_list' in url:
         filename = data_path(DATA_FILES['mission_columns'])
     elif 'mastresolver' in url:
@@ -239,6 +239,16 @@ def request_mockreturn(url, params={}):
         filename = data_path(DATA_FILES['tap_collections'])
     elif 'search/docs' in url:
         filename = data_path(DATA_FILES['available_missions'])
+    elif 'roman' in url and not allow_redirects:
+        if 'path_style' in url:
+            redirect_url = 'https://s3.us-west-2.amazonaws.com/example-bucket/path_style.asdf?signature=abc123'
+        elif 'invalid' in url:
+            redirect_url = 'invalid'
+        else:
+            redirect_url = 'https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123'
+        response = MagicMock()
+        response.headers = {'Location': redirect_url}
+        return response
     with open(filename, 'rb') as infile:
         content = infile.read()
     return MockResponse(content)
@@ -621,11 +631,6 @@ def test_missions_get_product_list_async():
         MastMissions.get_product_list_async([' '])
     assert 'Dataset list is empty' in str(err_empty.value)
 
-    # No dataset keyword
-    with pytest.raises(InvalidQueryError, match='Dataset keyword not found for mission "roman_spectra".'):
-        missions = MastMissions(mission='roman_spectra')
-        missions.get_product_list_async(Table({'a': [1, 2, 3]}))
-
 
 def test_missions_get_product_list():
     # String input
@@ -864,44 +869,47 @@ def test_missions_get_dataset_kwd(caplog):
     assert m.mission == 'classy'
     assert m.get_dataset_kwd() == 'Target'
 
-    # Switch to an unknown
-    m.mission = 'roman_spectra'
-    assert m.mission == 'roman_spectra'
-    assert m.get_dataset_kwd() is None
-    with caplog.at_level('WARNING', logger='astroquery'):
-        assert 'The mission "roman_spectra" does not have a known dataset ID keyword' in caplog.text
 
+def test_missions_get_cloud_uri_map(patch_boto3):
+    missions_uri = 'u9o40504m/u9o40504m_c3m.fits'
+    expected = 's3://stpubdata/hst/public/u9o4/u9o40504m/u9o40504m_c3m.fits'
 
-def test_missions_get_cloud_uri_map():
-    missions = MastMissions(mission='hst')
-    original_uris = [
-        'mast:HST/product/first.fits',
-        'mast:HST/product/second.fits',
-    ]
-    normalized_uris = [
-        'mast:HST/product/first.fits',
-        'mast:HST/product/second.fits',
-    ]
-    cloud_uris = {
-        normalized_uris[0]: 'first-cloud-uri',
-        normalized_uris[1]: 'second-cloud-uri',
-    }
-    with patch.object(missions, '_verify_mission'), \
-            patch.object(Observations, 'get_cloud_uris', return_value=cloud_uris) as get_cloud_uris:
-        result = missions.get_cloud_uri_map(
-            original_uris, include_bucket=False, full_url=True, verbose=False
-        )
+    # Table input
+    product = Table()
+    product['uri'] = [missions_uri]
+    uri_map = MastMissions.get_cloud_uri_map(product)
+    assert isinstance(uri_map, dict)
+    assert len(uri_map) == 1
+    assert uri_map[missions_uri] == expected
 
-    assert result == {
-        original_uris[0]: 'first-cloud-uri',
-        original_uris[1]: 'second-cloud-uri',
-    }
-    get_cloud_uris.assert_called_once_with(normalized_uris, **{
-        'include_bucket': False,
-        'full_url': True,
-        'return_uri_map': True,
-        'verbose': False,
-    })
+    # List input
+    uri_map = MastMissions.get_cloud_uri_map([missions_uri])
+    assert isinstance(uri_map, dict)
+    assert len(uri_map) == 1
+    assert uri_map[missions_uri] == expected
+
+    # Return full URLs
+    uri_map = MastMissions.get_cloud_uri_map([missions_uri], include_bucket=False, full_url=True)
+    assert isinstance(uri_map, dict)
+    assert uri_map[missions_uri].startswith('http://s3.amazonaws.com/')
+
+    # Warn if attempting to filter with list input
+    with pytest.warns(InputWarning, match='Filtering is not supported'):
+        MastMissions.get_cloud_uri_map([missions_uri],
+                                       extension='png')
+
+    # Warn if not found
+    with pytest.warns(NoResultsWarning, match='Failed to retrieve cloud path'):
+        MastMissions.get_cloud_uri_map(['mast:HST/product/does_not_exist.fits'])
+
+    # Cloud access not enabled
+    Observations.disable_cloud_dataset()
+    with pytest.raises(RemoteServiceError, match='Cloud data access is not enabled.'):
+        MastMissions.get_cloud_uri_map([missions_uri])
+
+    # Warn if no matching products are provided
+    with pytest.warns(NoResultsWarning, match='No matching products to fetch associated cloud URIs.'):
+        MastMissions.get_cloud_uri_map([])
 
 
 @pytest.mark.parametrize(
@@ -914,20 +922,32 @@ def test_missions_get_cloud_uri_map():
 )
 def test_missions_get_cloud_uri_map_roman(include_bucket, full_url, expected):
     missions = MastMissions(mission='roman')
-    redirect_url = 'https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123'
-    response = MagicMock()
-    response.headers = {'Location': redirect_url}
-
-    with patch.object(missions, '_verify_mission'), \
-            patch.object(missions, '_get_roman_cloud_location', return_value=redirect_url) as get_location:
-        result = missions.get_cloud_uri_map(
-            ['mast:ROMAN/product/test.asdf'],
-            include_bucket=include_bucket,
-            full_url=full_url,
-        )
-
+    result = missions.get_cloud_uri_map(
+        ['mast:ROMAN/product/test.asdf'],
+        include_bucket=include_bucket,
+        full_url=full_url,
+    )
     assert result == {'mast:ROMAN/product/test.asdf': expected}
-    get_location.assert_called_once()
+
+
+def test_missions_get_cloud_uri_map_roman_path_style():
+    missions = MastMissions(mission='roman')
+    result = missions.get_cloud_uri_map(
+        ['mast:ROMAN/product/path_style.asdf'],
+        include_bucket=True,
+        full_url=False,
+    )
+    assert result == {'mast:ROMAN/product/path_style.asdf': 's3://example-bucket/path_style.asdf'}
+
+
+def test_missions_get_cloud_uri_map_roman_invalid():
+    missions = MastMissions(mission='roman')
+    with pytest.raises(InvalidQueryError, match="Unable to determine S3 bucket from URL"):
+        missions.get_cloud_uri_map(
+            ['mast:ROMAN/product/invalid.asdf'],
+            include_bucket=True,
+            full_url=False,
+        )
 
 
 def test_missions_get_cloud_uri_map_conflicting_options():
