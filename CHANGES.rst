@@ -263,6 +263,7 @@ mast
   or an `~asdf.AsdfFile` object. [#3593]
 - Added support for the Hubble Spectroscopic Legacy Archive (HSLA) mission in ``MastMissions``. [#3689]
 - Added support for the Transiting Exoplanet Survey Satellite (TESS) mission in ``MastMissions``. [#3689]
+- Added ``get_cloud_uri_map`` method to ``MastMissions`` for mapping data products to their corresponding cloud URIs. [#3690]
 
 
 jplspec
