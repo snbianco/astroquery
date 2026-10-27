@@ -290,6 +290,7 @@ The following modules have been completed using a common API:
   ipac/ned/ned.rst
   nist/nist.rst
   noirlab/noirlab.rst
+  nrao/nrao.rst
   nvas/nvas.rst
   simbad/simbad.rst
   skyview/skyview.rst
@@ -314,7 +315,6 @@ These others are functional, but do not follow a common & consistent API:
   jplsbdb/jplsbdb.rst
   lamda/lamda.rst
   ipac/nexsci/nasa_exoplanet_archive.rst
-  oac/oac.rst
   ogle/ogle.rst
   open_exoplanet_catalogue/open_exoplanet_catalogue.rst
   sdss/sdss.rst
@@ -350,6 +350,7 @@ for each source)
   :maxdepth: 1
 
   alfalfa/alfalfa.rst
+  eso/eso.rst
   exoplanet_orbit_database/exoplanet_orbit_database.rst
   gama/gama.rst
   ipac/irsa/irsa_dust/irsa_dust.rst
@@ -399,6 +400,7 @@ generally return a table listing the available data first.
   magpis/magpis.rst
   mast/mast.rst
   ipac/ned/ned.rst
+  nrao/nrao.rst
   nvas/nvas.rst
   sdss/sdss.rst
   skyview/skyview.rst
