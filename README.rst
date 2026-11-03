@@ -43,7 +43,7 @@ website <https://simbad.cds.unistra.fr/simbad/>`_, use the ``simbad`` sub-packag
 Installation and Requirements
 -----------------------------
 
-Astroquery works with Python 3.9 or later.
+Astroquery works with Python 3.10 or later.
 As an `astropy`_ affiliate, astroquery requires `astropy`_ version 5.0 or later.
 
 The latest version of astroquery can be pip installed (note the ``--pre`` for
@@ -62,22 +62,12 @@ dependencies required to build the documentation or run the tests):
     $ python -m pip install -U --pre astroquery[all]
 
 
-To install the 'bleeding edge' version:
+To install the 'bleeding edge' version from GitHub:
 
 .. code-block:: bash
 
    $ python -m pip install git+https://github.com/astropy/astroquery.git
 
-or cloned and installed from source:
-
-.. code-block:: bash
-
-    $ # If you have a github account:
-    $ git clone git@github.com:astropy/astroquery.git
-    $ # If you do not:
-    $ git clone https://github.com/astropy/astroquery.git
-    $ cd astroquery
-    $ python -m pip install .
 
 Using astroquery
 ----------------
@@ -111,10 +101,17 @@ package. We create a separate Zenodo DOI for each version, they can be
 looked up at the following `Zenodo page <https://doi.org/10.5281/zenodo.591669>`__
 
 
+Code contributions
+------------------
+
+Astroquery welcomes PRs from our colleagues working at the various archives and astronomical data centers and/or of users of astroquery. 
+However, we opted in enforcing a PR limit to exitsing contributors due to the recent uptake of LLM generated PRs from people who are neither of the above.
+If you are a new contributor in any of the categories listed, please reach out to one of the maintainers on the astropy slack about your planned contributions so we can add you to the exeptions list.
+
 Additional Links
 ----------------
 
-Maintained by `Adam Ginsburg`_ and `Brigitta Sipocz <https://github.com/bsipocz>`_
+Maintained by `Adam Ginsburg`_ and `Brigitta Sipőcz <https://github.com/bsipocz>`_
 
 
 .. _Download Development ZIP: https://github.com/astropy/astroquery/zipball/main
