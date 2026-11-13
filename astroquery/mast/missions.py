@@ -216,6 +216,8 @@ class MastMissionsClass(MastQueryWithLogin):
         self.service = self._search  # current API service
         self.service_dict = {self._search: {'path': self._search},
                              self._list_products: {'path': self._list_products}}
+        self._service_api_connection.set_service_params(self.service_dict, 'search')
+
         self._available_missions = None  # Lazy loading of available missions from MAST Search API
 
         # Search attributes
@@ -342,21 +344,33 @@ class MastMissionsClass(MastQueryWithLogin):
         missions : list
             List of available missions in MAST Search API.
         """
-        if self._available_missions is not None:
-            return self._available_missions
+        if self.service == self._search:
+            results = self._service_api_connection._parse_result(response, verbose, data_key='results')
 
-        missions = []
-        html = utils._simple_request(f"{self._service_api_connection.MISSIONS_URL}docs").text
+            # If returning a count_only response, return the count as an integer
+            if isinstance(results, int):
+                return results
 
-        for match in re.findall(r'[\w/\.-]+openapi[\w/\.-]*\.json', html):
-            if match.startswith("/"):
-                continue
+            # Add column descriptions to column metadata
+            column_list = self.get_column_list(self._mission_to_search)
+            for col in results.columns:
+                if col in column_list['name']:
+                    description = column_list[column_list['name'] == col]['description'].value[0]
+                    results[col].meta = {'description': str(description)}
 
-            mission = re.search(r'(.+?)_api_openapi\.json$', match).group(1)
-            if mission:
-                missions.append(mission)
+            # Add search parameters to table metadata
+            result_json = response.json()
+            results.meta['search_params'] = result_json.get('search_params', {})
 
-        return missions
+            # Warn if maximum results are returned
+            if len(results) >= self.limit:
+                warnings.warn("Maximum results returned, may not include all sources within radius.",
+                              MaxResultsWarning)
+            return results
+
+        elif self.service == self._list_products:
+            products = self._extract_products(response)
+            return Table(products)
 
     @class_or_instance
     @deprecated_renamed_argument('objectname', 'object_names', since='0.4.12')
@@ -1203,97 +1217,6 @@ class MastMissionsClass(MastQueryWithLogin):
             return None
 
         return self.dataset_kwds[mission]
-
-    def _verify_mission(self, mission):
-        """
-        Verify that the specified mission is available in the MAST Search API.
-
-        Parameters
-        ----------
-        mission : str
-            The mission to verify.
-
-        Raises
-        ------
-        InvalidQueryError
-            If the specified mission is not available in the MAST Search API.
-        """
-        if mission not in self.available_missions:
-            closest = difflib.get_close_matches(mission, self.available_missions, n=1)
-            suggestion = f" Did you mean '{closest[0]}'? " if closest else ""
-            raise InvalidQueryError(
-                f"Mission '{mission}' is not available in the MAST Search API.{suggestion} "
-                f"Available missions are: {', '.join(self.available_missions)}."
-            )
-
-    def _extract_products(self, response):
-        """
-        Extract products from the response of a `~requests.Response` object.
-
-        Parameters
-        ----------
-        response : `~requests.Response`
-            The response object containing the products data.
-
-        Returns
-        -------
-        list
-            A list of products extracted from the response.
-        """
-        combined = []
-        for resp in response:
-            products = resp.json().get('products', [])
-            # Flatten if nested
-            if products and isinstance(products[0], list):
-                products = products[0]
-            combined.extend(products)
-        return combined
-
-    def _parse_result(self, response, *, verbose=False):  # Used by the async_to_sync decorator functionality
-        """
-        Parse the results of a `~requests.Response` objects and return an `~astropy.table.Table` of results.
-
-        Parameters
-        ----------
-        response : `~requests.Response`
-            `~requests.Response` objects.
-        verbose : bool
-            (presently does nothing - there is no output with verbose set to
-            True or False)
-            Default False. Setting to True provides more extensive output.
-
-        Returns
-        -------
-        response : `~astropy.table.Table`
-        """
-
-        if self.service == self._search:
-            results = self._service_api_connection._parse_result(response, verbose, data_key='results')
-
-            # If returning a count_only response, return the count as an integer
-            if isinstance(results, int):
-                return results
-
-            # Add column descriptions to column metadata
-            column_list = self.get_column_list(self._mission_to_search)
-            for col in results.columns:
-                if col in column_list['name']:
-                    description = column_list[column_list['name'] == col]['description'].value[0]
-                    results[col].meta = {'description': str(description)}
-
-            # Add search parameters to table metadata
-            result_json = response.json()
-            results.meta['search_params'] = result_json.get('search_params', {})
-
-            # Warn if maximum results are returned
-            if len(results) >= self.limit:
-                warnings.warn("Maximum results returned, may not include all sources within radius.",
-                              MaxResultsWarning)
-            return results
-
-        elif self.service == self._list_products:
-            products = self._extract_products(response)
-            return Table(products)
 
     def _validate_criteria(self, *, mission=None, **criteria):
         """
