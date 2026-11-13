@@ -313,6 +313,7 @@ mast
 - Added ``get_cloud_uri_map`` method to ``MastMissions`` for mapping data products to their corresponding cloud URIs. [#3690]
 - Added support to the ``MastMissions.get_product`` method for streaming parquet files directly to memory as an
   `~astropy.table.Table` object. [#3702]
+- Improve handling of HTTP error codes coming from MAST service requests. [#3707]
 
 
 jplspec
