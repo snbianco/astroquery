@@ -435,7 +435,8 @@ def test_missions_query_region():
     assert len(result) > 0
 
 
-def test_missions_query_criteria_async():
+def test_missions_query_criteria_async(mocker):
+    request_spy = mocker.spy(services.ServiceAPI, '_request')
     responses = MastMissions.query_criteria_async(
         coordinates=regionCoords,
         radius=3,
@@ -445,6 +446,10 @@ def test_missions_query_criteria_async():
         sci_aec='S'
     )
     assert isinstance(responses, MockResponse)
+    # Full searches should skip the expensive count computation
+    data = request_spy.call_args[1]['data']
+    assert data.get('skip_count') is True
+    assert 'count_only' not in data
 
 
 def test_missions_query_criteria_async_with_missing_results():
