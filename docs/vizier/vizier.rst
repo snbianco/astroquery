@@ -21,6 +21,22 @@ individual columns before retrieving the results.
     In astroquery >=0.4.8, the column names are the same in VizieR's webpages and in
     the tables received (for the two examples: you'll see ``r'mag`` and ``2MASS``).
 
+Mirrors
+-------
+
+VizieR is served from several mirrors, listed in
+``astroquery.vizier.conf.servers_list``. Choose one with
+``Vizier(vizier_server=...)``, or let astroquery pick the fastest one by
+sending a short (1 s timeout) HEAD request to each mirror:
+
+.. doctest-remote-data::
+
+    >>> from astroquery.vizier import Vizier, conf
+    >>> conf.servers_list
+    ['vizier.cds.unistra.fr', 'vizier.cfa.harvard.edu', 'vizier.nao.ac.jp', ...]
+    >>> viz = Vizier(find_mirror=True)  # logs the selected mirror
+    >>> viz.VIZIER_SERVER
+
 Catalogs exploration
 --------------------
 
@@ -267,10 +283,9 @@ To see the result:
 .. doctest-remote-data::
 
     >>> print(result)
-    TableList with 5 tables:
+    TableList with 4 tables:
        '0:I/254/out' with 10 column(s) and 17 row(s) 
        '1:I/255/out' with 9 column(s) and 17 row(s) 
-       '2:I/271/out' with 11 column(s) and 50 row(s) 
        '3:I/305/out' with 11 column(s) and 50 row(s) 
        '4:I/353/gsc242' with 35 column(s) and 50 row(s) 
 

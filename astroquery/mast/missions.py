@@ -7,31 +7,176 @@ This module contains methods for searching MAST missions.
 """
 
 import difflib
+import importlib
 import json
+import re
 import warnings
 from collections.abc import Iterable
 from json import JSONDecodeError
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import astropy.units as u
-from astropy.coordinates import SkyCoord, BaseCoordinateFrame, Angle
 import numpy as np
-from astropy.table import Table, Row, Column, vstack
-from astropy.utils.decorators import deprecated_renamed_argument
+import requests
+from astropy.coordinates import Angle, BaseCoordinateFrame, SkyCoord
+from astropy.io import fits
+from astropy.table import Column, Row, Table, vstack
+from astropy.utils.decorators import deprecated, deprecated_renamed_argument
 from requests import HTTPError, RequestException
 
 from astroquery import log
-from astroquery.utils import commons, async_to_sync
-from astroquery.utils.class_or_instance import class_or_instance
-from astroquery.exceptions import InputWarning, InvalidQueryError, MaxResultsWarning, NoResultsWarning
-
+from astroquery.exceptions import (
+    AuthenticationWarning,
+    InputWarning,
+    InvalidQueryError,
+    MaxResultsWarning,
+    NoResultsWarning,
+)
 from astroquery.mast import utils
 from astroquery.mast.core import MastQueryWithLogin
+from astroquery.utils import async_to_sync, commons
+from astroquery.utils.class_or_instance import class_or_instance
 
 from . import conf
 
+try:
+    from fsspec.asyn import sync as fsspec_sync
+    from fsspec.implementations.http import HTTPFile, HTTPFileSystem, HTTPStreamFile
+
+    # Custom HTTP file and filesystem classes that automatically refresh the URL if it has expired.
+    class _RefreshingHTTPFile(HTTPFile):
+        async def _refresh_url(self):
+            # Refresh the URL for the HTTP request if it has expired or is invalid.
+            async with self.session.get(
+                self.fs.gateway_url,
+                headers=self.fs.gateway_headers,
+                allow_redirects=False,
+            ) as response:
+                response.raise_for_status()
+                refreshed_url = response.headers.get("Location")
+
+            if not refreshed_url:
+                raise RuntimeError("The MAST response did not include a Location header.")
+
+            self.url = refreshed_url
+
+        async def _async_fetch_range_with_refresh(self, start, end):
+            # Attempt to fetch the specified byte range, refreshing the URL if necessary.
+            try:
+                return await super().async_fetch_range(start, end)
+            except Exception as exc:
+                status = getattr(exc, "status", None)
+                if status not in {400, 403}:
+                    raise
+
+                # If an HTTP error occurs due to an expired or invalid URL, refresh the URL and retry.
+                log.info("Refreshing URL due to HTTP status %s", status)
+                await self._refresh_url()
+                return await super().async_fetch_range(start, end)
+
+        def _fetch_range(self, start, end):
+            # Synchronously fetch the specified byte range, using the async method with URL refresh.
+            return fsspec_sync(
+                self.loop,
+                self._async_fetch_range_with_refresh,
+                start,
+                end,
+            )
+
+    class _RefreshingHTTPFileSystem(HTTPFileSystem):
+        def __init__(self, gateway_url, gateway_headers=None, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.gateway_url = gateway_url
+            self.gateway_headers = gateway_headers or {}
+
+        def _open(self, path, mode="rb", block_size=None, autocommit=None, cache_type=None,
+                  cache_options=None, size=None, **kwargs):
+            # Open the file using the refreshing HTTP file system.
+            if mode != "rb":
+                raise NotImplementedError("Only read-binary mode is supported.")
+
+            block_size = block_size if block_size is not None else self.block_size
+            file_kwargs = self.kwargs.copy()
+            file_kwargs["asynchronous"] = self.asynchronous
+            file_kwargs.update(kwargs)
+
+            info = {}
+            size = size or info.update(self.info(path, **kwargs)) or info["size"]
+            session = fsspec_sync(self.loop, self.set_session)
+
+            if block_size and size and info.get("partial", True):
+                return _RefreshingHTTPFile(
+                    self,
+                    path,
+                    session=session,
+                    block_size=block_size,
+                    mode=mode,
+                    size=size,
+                    cache_type=cache_type or self.cache_type,
+                    cache_options=cache_options or self.cache_options,
+                    loop=self.loop,
+                    **file_kwargs,
+                )
+
+            return HTTPStreamFile(
+                self,
+                path,
+                mode=mode,
+                loop=self.loop,
+                session=session,
+                **file_kwargs,
+            )
+
+    HAS_FSSPEC = True
+except ImportError:
+    HAS_FSSPEC = False
+
+try:
+    import asdf
+    HAS_ASDF = True
+except ImportError:
+    HAS_ASDF = False
+
 __all__ = ['MastMissionsClass', 'MastMissions']
+
+
+def _open_refreshing_asdf(download_url, headers, **kwargs):
+    """
+    Open an ASDF file from an S3 URL that requires refreshing via the HTTP gateway.
+
+    Parameters
+    ----------
+    download_url : str
+        The URL to download the ASDF file from.
+    headers : dict
+        The headers to include in the HTTP request.
+    **kwargs : dict
+        Additional keyword arguments to pass to `asdf.open`.
+
+    Returns
+    -------
+    asdf.AsdfFile
+        The opened ASDF file.
+    """
+    # Perform an initial request to get the S3 URL for the ASDF file
+    response = requests.get(
+        download_url,
+        headers=headers,
+        allow_redirects=False,
+    )
+    response.raise_for_status()
+    s3_url = response.headers["Location"]
+
+    # Open the ASDF file using the refreshing HTTP file system
+    fs = _RefreshingHTTPFileSystem(
+        gateway_url=download_url,
+        gateway_headers=headers,
+        block_size=1 * 1024 * 1024,
+        cache_type="bytes",
+    )
+    file_object = fs.open(s3_url, "rb")
+    return asdf.open(file_object, **kwargs)
 
 
 @async_to_sync
@@ -63,15 +208,22 @@ class MastMissionsClass(MastQueryWithLogin):
             'hst': 'sci_data_set_name',
             'jwst': 'fileSetName',
             'roman': 'fileSetName',
+            'roman_wfi': 'fileSetName',
+            'roman_cgi': 'fileSetName',
+            'roman_spectra': 'fileSetName',
             'classy': 'Target',
             'ullyses': 'observation_id',
-            'iue': 'iue_data_id'
+            'iue': 'iue_data_id',
+            'hsla': 'dataSetName',
+            'tess': 'fileSetName',
+            'multi_mission': 'obs_id'
         }
 
         # Service attributes
         self.service = self._search  # current API service
         self.service_dict = {self._search: {'path': self._search},
                              self._list_products: {'path': self._list_products}}
+        self._available_missions = None  # Lazy loading of available missions from MAST Search API
 
         # Search attributes
         self._search_option_fields = ['limit', 'offset', 'sort_by', 'search_key', 'sort_desc', 'select_cols',
@@ -89,6 +241,60 @@ class MastMissionsClass(MastQueryWithLogin):
         # Setter that updates the service parameters if the mission is changed
         self._mission = value.lower()  # case-insensitive
         self._service_api_connection.set_service_params(self.service_dict, f'search/{self.mission}')
+
+    @property
+    def available_missions(self):
+        """Return a list of available missions in the MAST Search API."""
+        if self._available_missions is None:
+            self._available_missions = self.get_available_missions()
+        return self._available_missions
+
+    def get_available_missions(self):
+        """
+        Return a list of available missions in the MAST Search API.
+
+        Returns
+        -------
+        missions : list
+            List of available missions in MAST Search API.
+        """
+        if self._available_missions is not None:
+            return self._available_missions
+
+        missions = []
+        html = utils._simple_request(f"{self._service_api_connection.MISSIONS_URL}docs").text
+
+        for match in re.findall(r'[\w/\.-]+openapi[\w/\.-]*\.json', html):
+            if match.startswith("/"):
+                continue
+
+            mission = re.search(r'(.+?)_api_openapi\.json$', match).group(1)
+            if mission:
+                missions.append(mission)
+
+        return missions
+
+    def _verify_mission(self, mission):
+        """
+        Verify that the specified mission is available in the MAST Search API.
+
+        Parameters
+        ----------
+        mission : str
+            The mission to verify.
+
+        Raises
+        ------
+        InvalidQueryError
+            If the specified mission is not available in the MAST Search API.
+        """
+        if mission not in self.available_missions:
+            closest = difflib.get_close_matches(mission, self.available_missions, n=1)
+            suggestion = f" Did you mean '{closest[0]}'? " if closest else ""
+            raise InvalidQueryError(
+                f"Mission '{mission}' is not available in the MAST Search API.{suggestion} "
+                f"Available missions are: {', '.join(self.available_missions)}."
+            )
 
     def _extract_products(self, response):
         """
@@ -134,6 +340,21 @@ class MastMissionsClass(MastQueryWithLogin):
         if self.service == self._search:
             results = self._service_api_connection._parse_result(response, verbose, data_key='results')
 
+            # If returning a count_only response, return the count as an integer
+            if isinstance(results, int):
+                return results
+
+            # Add column descriptions to column metadata
+            column_list = self.get_column_list()
+            for col in results.columns:
+                if col in column_list['name']:
+                    description = column_list[column_list['name'] == col]['description'].value[0]
+                    results[col].meta = {'description': str(description)}
+
+            # Add search parameters to table metadata
+            result_json = response.json()
+            results.meta['search_params'] = result_json.get('search_params', {})
+
             # Warn if maximum results are returned
             if len(results) >= self.limit:
                 warnings.warn("Maximum results returned, may not include all sources within radius.",
@@ -166,6 +387,10 @@ class MastMissionsClass(MastQueryWithLogin):
         # Check each criteria argument for validity
         valid_cols = list(self.columns[self.mission]['name']) + self._search_option_fields
         for kwd in criteria.keys():
+            if kwd == "pass_id" and "pass_id" not in valid_cols and "pass" in valid_cols:
+                # Special case where the actual column name is "pass", but that's a reserved keyword in Python
+                # We allow "pass_id" as an alias
+                kwd = "pass"
             col = next((name for name in valid_cols if name == kwd), None)
             if not col:
                 closest_match = difflib.get_close_matches(kwd, valid_cols, n=1)
@@ -359,7 +584,7 @@ class MastMissionsClass(MastQueryWithLogin):
     @class_or_instance
     @deprecated_renamed_argument('objectname', 'object_names', since='0.4.12')
     def query_criteria_async(self, *, coordinates=None, object_names=None, radius=3*u.arcmin,
-                             limit=5000, offset=0, select_cols=None, resolver=None, **criteria):
+                             limit=5000, offset=0, select_cols=None, resolver=None, count_only=False, **criteria):
         """
         Given a set of search criteria, returns a list of mission metadata.
 
@@ -395,6 +620,8 @@ class MastMissionsClass(MastQueryWithLogin):
             "SIMBAD" and "NED". If not specified, the default resolver order will be used. Please see the
             `STScI Archive Name Translation Application (SANTA) <https://mastresolver.stsci.edu/Santa-war/>`__
             for more information. Default is None.
+        count_only : bool, optional
+            Default is False. If True, only the count of matching datasets will be returned.
         **criteria
             Criteria to apply. Valid criteria include coordinates, object_names, radius (as in
             `~astroquery.mast.missions.MastMissionsClass.query_region` and
@@ -403,7 +630,8 @@ class MastMissionsClass(MastQueryWithLogin):
             List of all valid fields that can be used to match results on criteria can be retrieved by calling
             `~astroquery.mast.missions.MastMissionsClass.get_column_list` function.
             To filter by multiple values for a single column, pass in a list of values or
-            a comma-separated string of values.
+            a comma-separated string of values. For the Roman mission, you can also use the special "pass_id"
+            keyword as an alias for the "pass" column, which is a reserved keyword in Python.
 
         Returns
         -------
@@ -421,26 +649,29 @@ class MastMissionsClass(MastQueryWithLogin):
         # Check that criteria arguments are valid
         self._validate_criteria(**criteria)
 
-        target_strings = None
+        # Build query
+        params = {"limit": self.limit, "offset": offset, "select_cols": self._parse_select_cols(select_cols)}
+
+        # Parse target information if coordinates or object names are provided
         if coordinates is not None or object_names is not None:
             target_strings = self._parse_multiple_targets(coordinates=coordinates,
                                                           object_names=object_names,
                                                           resolver=resolver)
 
-        # if radius is just a number we assume degrees
-        radius = Angle(radius, u.arcmin)
+            # if radius is just a number we assume degrees
+            radius = Angle(radius, u.arcmin)
 
-        if radius > self._max_query_radius:
-            raise InvalidQueryError(
-                f"Query radius too large. Must be ≤{self._max_query_radius}, got {radius}."
-            )
+            if radius > self._max_query_radius:
+                raise InvalidQueryError(
+                    f"Query radius too large. Must be ≤{self._max_query_radius}, got {radius}."
+                )
 
-        # build query
-        params = {"limit": self.limit, "offset": offset, 'select_cols': self._parse_select_cols(select_cols)}
-        if target_strings:
             params["target"] = target_strings
             params["radius"] = radius.arcsec
             params["radius_units"] = 'arcseconds'
+
+        if count_only:
+            params["count_only"] = True
 
         self._build_params_from_criteria(params, **criteria)
 
@@ -448,7 +679,7 @@ class MastMissionsClass(MastQueryWithLogin):
 
     @class_or_instance
     def query_region_async(self, coordinates, *, radius=3*u.arcmin, limit=5000, offset=0,
-                           select_cols=None, **criteria):
+                           select_cols=None, count_only=False, **criteria):
         """
         Given a sky position (or positions) and radius, returns a list of matching dataset IDs.
 
@@ -473,13 +704,16 @@ class MastMissionsClass(MastQueryWithLogin):
             If None, a default set of columns will be returned.
             Can either be an iterable of column names, a comma-separated string of column names,
             or 'all'/'*' to return all available columns.
+        count_only : bool, optional
+            Default is False. If True, only the count of matching datasets will be returned.
         **criteria
             Other mission-specific criteria arguments.
             All valid filters can be found using `~astroquery.mast.missions.MastMissionsClass.get_column_list`
             function.
             For example, one can specify the output columns(select_cols) or use other filters(conditions).
             To filter by multiple values for a single column, pass in a list of values or
-            a comma-separated string of values.
+            a comma-separated string of values. For the Roman mission, you can also use the special "pass_id"
+            keyword as an alias for the "pass" column, which is a reserved keyword in Python.
 
         Returns
         -------
@@ -495,12 +729,13 @@ class MastMissionsClass(MastQueryWithLogin):
                                          limit=limit,
                                          offset=offset,
                                          select_cols=select_cols,
+                                         count_only=count_only,
                                          **criteria)
 
     @class_or_instance
     @deprecated_renamed_argument('objectname', 'object_names', since='0.4.12')
     def query_object_async(self, object_names, *, radius=3*u.arcmin, limit=5000, offset=0,
-                           select_cols=None, resolver=None, **criteria):
+                           select_cols=None, resolver=None, count_only=False, **criteria):
         """
         Given an object name (or names), returns a list of matching rows.
 
@@ -530,13 +765,16 @@ class MastMissionsClass(MastQueryWithLogin):
             "SIMBAD" and "NED". If not specified, the default resolver order will be used. Please see the
             `STScI Archive Name Translation Application (SANTA) <https://mastresolver.stsci.edu/Santa-war/>`__
             for more information. Default is None.
+        count_only : bool, optional
+            Default is False. If True, only the count of matching datasets will be returned.
         **criteria
             Other mission-specific criteria arguments.
             All valid filters can be found using `~astroquery.mast.missions.MastMissionsClass.get_column_list`
             function.
             For example, one can specify the output columns(select_cols) or use other filters(conditions).
             To filter by multiple values for a single column, pass in a list of values or
-            a comma-separated string of values.
+            a comma-separated string of values. For the Roman mission, you can also use the special "pass_id"
+            keyword as an alias for the "pass" column, which is a reserved keyword in Python.
 
         Returns
         -------
@@ -548,6 +786,7 @@ class MastMissionsClass(MastQueryWithLogin):
                                          offset=offset,
                                          select_cols=select_cols,
                                          resolver=resolver,
+                                         count_only=count_only,
                                          **criteria)
 
     @class_or_instance
@@ -691,7 +930,63 @@ class MastMissionsClass(MastQueryWithLogin):
 
         return products[filter_mask]
 
-    def download_file(self, uri, *, local_path=None, cache=True, verbose=True):
+    def _get_download_url(self, uri, mission=None):
+        """
+        Construct the full download URL for a given data URI based on the mission.
+
+        Parameters
+        ----------
+        uri : str
+            The product filename or URI for which to construct the download URL.
+        mission : str, optional
+            The mission to which the file belongs. If not provided, the current value of the ``mission`` attribute
+            will be used.
+
+        Returns
+        -------
+        url : str
+            The full URL download path.
+        """
+        current_mission = mission.lower() if mission else self.mission
+
+        if current_mission in ['hst', 'jwst', 'roman', 'roman_wfi', 'roman_spectra', 'roman_cgi', 'tess', 'hsla']:
+            # Certain missions have a dedicated endpoint for retrieving products
+            base_url = (f"{self._service_api_connection.MISSIONS_DOWNLOAD_URL}{current_mission}"
+                        "/api/v0.1/retrieve_product")
+            keyword = 'product_name'
+        else:
+            # HLSPs use MAST download URL
+            base_url = self._service_api_connection.MAST_DOWNLOAD_URL
+            keyword = 'uri'
+            # These files require a MAST URI and not just a filename
+            if not uri.startswith('mast'):
+                raise InvalidQueryError(f'For mission "{current_mission}", a full MAST URI is required '
+                                        f'for downloading. Got "{uri}".')
+
+        return base_url + f'?{keyword}=' + quote(uri, safe='')
+
+    def _warn_no_auth(self, download_url):
+        """
+        Warn the user that they are not authenticated to download the file, and provide guidance on how to authenticate.
+
+        Parameters
+        ----------
+        download_url : str
+            The URL that the user attempted to download from, which requires authentication.
+        """
+        no_auth_msg = f'You are not authorized to access {download_url}.'
+        if self._authenticated:
+            no_auth_msg += ('\nYou do not have access to this data, or your authentication '
+                            'token may be expired. You can generate a new token at '
+                            'https://auth.mast.stsci.edu/token?suggested_name=Astroquery&'
+                            'suggested_scope=mast:exclusive_access')
+        else:
+            no_auth_msg += ('\nPlease authenticate yourself using the `~astroquery.mast.MastMissions.login` '
+                            'function or initialize `~astroquery.mast.MastMissions` with an authentication '
+                            'token.')
+        warnings.warn(no_auth_msg, AuthenticationWarning)
+
+    def download_file(self, uri, *, local_path=None, cache=True, mission=None, verbose=True):
         """
         Downloads a single file based on the data URI.
 
@@ -703,6 +998,9 @@ class MastMissionsClass(MastQueryWithLogin):
             Directory or filename to which the file will be downloaded.  Defaults to current working directory.
         cache : bool
             Default is True. If file is found on disk, it will not be downloaded again.
+        mission : str, optional
+            The mission to which the file belongs. If not provided, the current value of the ``mission`` attribute
+            will be used.
         verbose : bool, optional
             Default is True. Whether to show download progress in the console.
 
@@ -715,22 +1013,8 @@ class MastMissionsClass(MastQueryWithLogin):
         url : str
             The full URL download path.
         """
-
         # Construct the full data URL based on mission
-        if self.mission in ['hst', 'jwst', 'roman', 'roman_spectra', 'roman_cgi']:
-            # HST, JWST, and RST have a dedicated endpoint for retrieving products
-            base_url = self._service_api_connection.MISSIONS_DOWNLOAD_URL + self.mission + '/api/v0.1/retrieve_product'
-            keyword = 'product_name'
-        else:
-            # HLSPs use MAST download URL
-            base_url = self._service_api_connection.MAST_DOWNLOAD_URL
-            keyword = 'uri'
-            # These files require a MAST URI and not just a filename
-            if not uri.startswith('mast:'):
-                raise InvalidQueryError(f'For mission "{self.mission}", a full MAST URI is required for downloading. '
-                                        f'Got "{uri}".')
-        data_url = base_url + f'?{keyword}=' + uri
-        escaped_url = base_url + f'?{keyword}=' + quote(uri, safe='')
+        download_url = self._get_download_url(uri, mission=mission)
 
         # Determine local file path. Use current directory as default.
         filename = Path(uri).name
@@ -745,30 +1029,20 @@ class MastMissionsClass(MastQueryWithLogin):
 
         try:
             # Attempt file download
-            self._download_file(escaped_url, local_path, cache=cache, verbose=verbose)
+            self._download_file(download_url, local_path, cache=cache, verbose=verbose)
 
             # Check if file exists
             if not local_path.is_file() and status != 'SKIPPED':
                 status = 'ERROR'
                 msg = 'File was not downloaded'
-                url = data_url
+                url = download_url
 
         except HTTPError as err:
             if err.response.status_code == 401:
-                no_auth_msg = f'You are not authorized to download from {data_url}.'
-                if self._authenticated:
-                    no_auth_msg += ('\nYou do not have access to download this data, or your authentication '
-                                    'token may be expired. You can generate a new token at '
-                                    'https://auth.mast.stsci.edu/token?suggested_name=Astroquery&'
-                                    'suggested_scope=mast:exclusive_access')
-                else:
-                    no_auth_msg += ('\nPlease authenticate yourself using the `~astroquery.mast.MastMissions.login` '
-                                    'function or initialize `~astroquery.mast.MastMissions` with an authentication '
-                                    'token.')
-                log.warning(no_auth_msg)
+                self._warn_no_auth(download_url)
             status = 'ERROR'
             msg = f'HTTPError: {err}'
-            url = data_url
+            url = download_url
 
         return status, msg, url
 
@@ -795,7 +1069,6 @@ class MastMissionsClass(MastQueryWithLogin):
         response : `~astropy.table.Table`
             Table containing download results for each data product file.
         """
-
         manifest_entries = []
         base_dir = Path(base_dir)
 
@@ -813,7 +1086,12 @@ class MastMissionsClass(MastQueryWithLogin):
                 raise InvalidQueryError('Data product is missing "dataset" or "fileset" field required for '
                                         'constructing local download path. Specify `flat=True` to avoid this '
                                         'requirement.')
-            local_path = base_dir / dataset if not flat else base_dir
+
+            # If the products are a subscription JSON, they should include a mission field
+            mission = data_product['mission'].lower() if 'mission' in col_names else self.mission
+
+            # Create the local file path
+            local_path = base_dir if flat else base_dir / 'mastDownload' / mission / dataset
             local_path.mkdir(parents=True, exist_ok=True)
             local_file_path = local_path / Path(filename).name
 
@@ -821,6 +1099,7 @@ class MastMissionsClass(MastQueryWithLogin):
             status, msg, url = self.download_file(uri,
                                                   local_path=local_file_path,
                                                   cache=cache,
+                                                  mission=mission,
                                                   verbose=verbose)
             manifest_entries.append([local_file_path, status, msg, url])
 
@@ -901,16 +1180,202 @@ class MastMissionsClass(MastQueryWithLogin):
 
         # Set up base directory for downloads
         download_dir = Path(download_dir or '.')
-        base_dir = download_dir if flat else download_dir / 'mastDownload' / self.mission
 
         # Download files
         manifest = self._download_files(products,
-                                        base_dir=base_dir,
+                                        base_dir=download_dir,
                                         flat=flat,
                                         cache=cache,
                                         verbose=verbose)
 
         return manifest
+
+    def get_product(self, uri, *, mission=None, **kwargs):
+        """
+        Reads a data product file directly from a URI into an appropriate in-memory object based on file type.
+        Supported file types are FITS and ASDF.
+
+        FITS files are opened with `~astropy.io.fits.open` and are downloaded and cached on disk. ASDF files
+        are opened directly from the presigned S3 URL using `~fsspec.open` and `~asdf.open`, without being
+        downloaded to disk.
+
+        Parameters
+        ----------
+        uri : str
+            The product filename or URI to be read.
+        mission : str, optional
+            The mission to which the file belongs. If not provided, the current value of the ``mission`` attribute
+            will be used.
+        **kwargs
+            Additional keyword arguments to be passed to the file reading function (e.g., `~astropy.io.fits.open`
+            or `~asdf.open`).
+        """
+        # Construct the full data URL based on mission
+        download_url = self._get_download_url(uri, mission=mission)
+
+        try:
+            if uri.endswith((".fits", ".fits.gz")):
+                # Read in a
+                return fits.open(download_url, **kwargs)
+            elif uri.endswith(".asdf"):
+                if not HAS_FSSPEC:
+                    raise ImportError('The "fsspec" package is required to read products directly from a URI. '
+                                      'Please install it with `pip install fsspec` or install astroquery with '
+                                      'optional dependencies using `pip install astroquery[all]`.')
+                if not HAS_ASDF:
+                    raise ImportError('The "asdf" package is required to read ASDF files. Please install it with '
+                                      '`pip install asdf` or install astroquery with optional dependencies using '
+                                      '`pip install astroquery[all]`.')
+                for package in ["gwcs", "lz4", "roman_datamodels"]:
+                    if importlib.util.find_spec(package) is None:
+                        warnings.warn(f'The "{package}" package is encouraged when reading ASDF files from the '
+                                      'Roman Space Telescope mission. Please install it with `pip install {package}` '
+                                      'or install astroquery with optional dependencies using '
+                                      '`pip install astroquery[all]`.', ImportWarning)
+
+                headers = {}
+                if self._authenticated:
+                    headers["Authorization"] = f"token {self._auth_obj.session.cookies['mast_token']}"
+                return _open_refreshing_asdf(download_url, headers, **kwargs)
+            else:
+                raise InvalidQueryError(f"Unsupported file type for reading: {uri}. "
+                                        "Supported types are .fits and .asdf.")
+        except HTTPError as err:
+            if err.response.status_code == 401:
+                self._warn_no_auth(download_url)
+            raise
+
+    @deprecated(since="v0.4.12", alternative="get_product")
+    def read_product(self, uri, *, mission=None, **kwargs):
+        """
+        Deprecated. Use `get_product` instead.
+        """
+        return self.get_product(uri, mission=mission, **kwargs)
+
+    def get_cloud_uri_map(self, products=None, *, include_bucket=True, full_url=False, extension=None,
+                          filter_products={}, mission=None, verbose=True):
+        """
+        Given an `~astropy.table.Table` of data products or query criteria and filter parameters,
+        returns the associated cloud data URIs.
+
+        Parameters
+        ----------
+        products : `~astropy.table.Table`, list
+            Table containing products or list of MAST URIs to be converted into cloud data uris.
+            If provided, this will supercede page_size, page, or any keyword arguments passed in as criteria.
+        include_bucket : bool
+            Default True. When False, returns the path of the file relative to the
+            top level cloud storage location.
+            Must be set to False when using the full_url argument.
+        full_url : bool
+            Default False. Return an HTTP fetchable url instead of a cloud uri.
+            Must set include_bucket to False to use this option.
+        extension : string or array, optional
+            Default None. Option to filter by file extension.
+        filter_products : dict, optional
+            Filters to be applied to data products.  Valid filters are all products fields listed
+            `here <https://masttest.stsci.edu/api/v0/_productsfields.html>`__.
+            The column name as a string is the key. The corresponding value is one
+            or more acceptable values for that parameter.
+            Filter behavior is AND between the filters and OR within a filter set.
+            For example: {"productType": "SCIENCE", "extension"=["fits","jpg"]}
+        mission : str, optional
+            The mission to which the data products belong. If not provided, the current value
+            of the ``mission`` attribute will be used.
+        verbose : bool, optional
+            Default True. Whether to issue warnings if a product cannot be found in the cloud.
+
+        Returns
+        -------
+        map : dict
+            Dictionary mapping the original data product URIs to their corresponding cloud URIs.
+        """
+        if include_bucket and full_url:
+            raise InvalidQueryError('include_bucket must be set to False when full_url is True.')
+
+        mission = mission.lower() if mission else self.mission
+        self._verify_mission(mission)
+
+        if isinstance(products, Table):
+            # Filter product list
+            products = self.filter_products(products, extension=extension, **filter_products)
+            data_uris = products['uri']
+        else:  # data_products is a list of URIs
+            # Warn if trying to supply filters
+            if filter_products or extension:
+                warnings.warn('Filtering is not supported when providing a list of MAST URIs. '
+                              'To apply filters, please provide query criteria or a table of data products '
+                              'as returned by `Observations.get_product_list`', InputWarning)
+            data_uris = products
+
+        if data_uris is None or not len(data_uris):
+            warnings.warn('No matching products to fetch associated cloud URIs.', NoResultsWarning)
+            return
+
+        # Remove duplicate products
+        data_uris = utils.remove_duplicate_products(data_uris, 'dataURI')
+
+        uri_map = {}
+        if mission in ['roman', 'roman_wfi', 'roman_spectra', 'roman_cgi']:
+            for uri in data_uris:
+                # Get the presigned S3 URL for the Roman data product
+                s3_url = self._get_roman_cloud_location(self._get_download_url(uri, mission))
+
+                if full_url or s3_url is None:
+                    cloud_uri = s3_url
+                else:
+                    parsed_url = urlsplit(s3_url)
+                    host = parsed_url.hostname or ''
+                    path = parsed_url.path.lstrip('/')
+                    if '.s3' in host:
+                        bucket = host.split('.s3', 1)[0]
+                    elif host == 's3.amazonaws.com' or host.startswith('s3.'):
+                        bucket, _, path = path.partition('/')
+                    else:
+                        raise InvalidQueryError(f"Unable to determine S3 bucket from URL: {s3_url}")
+
+                    cloud_uri = f"s3://{bucket}/{path}" if include_bucket else path
+
+                uri_map[str(uri)] = cloud_uri
+
+            return uri_map
+        else:
+            normalized_uris = [f"mast:{mission.upper()}/product/{str(uri).split('/')[-1]}"
+                               for uri in data_uris]
+            from astroquery.mast import Observations
+            normalized_uri_map = Observations.get_cloud_uris(
+                normalized_uris,
+                include_bucket=include_bucket,
+                full_url=full_url,
+                return_uri_map=True,
+                verbose=verbose,
+            )
+            return {str(uri): normalized_uri_map.get(normalized_uri)
+                    for uri, normalized_uri in zip(data_uris, normalized_uris)}
+
+    def _get_roman_cloud_location(self, download_url):
+        """
+        Retrieves the cloud location for a Roman data product given its download URL.
+
+        Parameters
+        ----------
+        download_url : str
+            The download URL for the Roman data product.
+
+        Returns
+        -------
+        str
+            The cloud location URL for the Roman data product.
+        """
+        # Make an authenticated request to get the presigned S3 URL for the ASDF file
+        headers = {}
+        if self._authenticated:
+            headers["Authorization"] = f"token {self._auth_obj.session.cookies['mast_token']}"
+
+        resp = utils._simple_request(download_url, headers=headers, allow_redirects=False)
+        resp.raise_for_status()
+
+        return resp.headers.get("Location")
 
     @class_or_instance
     def get_column_list(self):

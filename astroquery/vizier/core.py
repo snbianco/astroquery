@@ -22,8 +22,9 @@ from ..query import BaseQuery
 from ..utils import commons
 from ..utils import async_to_sync
 from ..utils import schema
+from astroquery import log
 from . import conf
-from ..exceptions import TableParseError, EmptyResponseError
+from ..exceptions import TableParseError, EmptyResponseError, RemoteServiceError
 
 
 __all__ = ['Vizier', 'VizierClass']
@@ -46,7 +47,8 @@ class VizierClass(BaseQuery):
 
     def __init__(self, *, columns=["*"], column_filters={}, catalog=None,
                  keywords=None, ucd="", timeout=conf.timeout,
-                 vizier_server=conf.server, row_limit=conf.row_limit):
+                 vizier_server=conf.server, row_limit=conf.row_limit,
+                 find_mirror=False):
         """
         Parameters
         ----------
@@ -71,6 +73,10 @@ class VizierClass(BaseQuery):
             Maximum number of rows that will be fetched from the result
             (set to -1 for unlimited).
             (This parameter's default is set from a configuration object.)
+        find_mirror : bool
+            If True, send a short HEAD request (1 s timeout) to each mirror in
+            ``conf.servers_list``, switch to the fastest and
+            report it.  See also `VizierClass.find_mirror`.
         """
 
         super().__init__()
@@ -84,6 +90,32 @@ class VizierClass(BaseQuery):
         self.TIMEOUT = timeout
         self.VIZIER_SERVER = vizier_server
         self.ROW_LIMIT = row_limit
+        if find_mirror:
+            self.find_mirror()
+
+    @property
+    def servers_list(self):
+        """The list of available VizieR mirrors."""
+        return list(conf.servers_list)
+
+    def find_mirror(self, *, timeout=1.0):
+        """Switch to the fastest responding mirror and return its name.
+
+        Parameters
+        ----------
+        timeout : number
+            Time limit in seconds for the request sent to each mirror.
+
+        Returns
+        -------
+        str
+            The name of the selected mirror.
+        """
+        server, timings = commons.find_fastest_mirror(
+            self.servers_list, path="/viz-bin/votable", timeout=timeout)
+        self.VIZIER_SERVER = server
+        log.info(f"Using VizieR mirror {server} ({timings[server]:.2f}s)")
+        return server
 
     @property
     def columns(self):
@@ -757,10 +789,10 @@ class VizierClass(BaseQuery):
         """
         if response.content[:5] == b'<?xml':
             try:
-                return _parse_vizier_votable(
+                return self._parse_vizier_votable(
                     response.content, verbose=verbose, invalid=invalid,
                     get_catalog_names=get_catalog_names)
-            except Exception as ex:
+            except ValueError as ex:
                 self.response = response
                 self.table_parse_error = ex
                 raise TableParseError("Failed to parse VIZIER result! The "
@@ -789,6 +821,70 @@ class VizierClass(BaseQuery):
 
         return self._valid_keyword_dict
 
+    def _raise_error_on_server_error(self, vo_tree):
+        if not commons.ASTROPY_LT_5_3:
+            query_status = next(vo_tree.get_infos_by_name("QUERY_STATUS"), None)
+        else:  # remove when support for astropy older than 5.3 is dropped
+            query_status = [info for info in vo_tree.infos if info.name == "QUERY_STATUS"]
+            query_status = None if query_status == [] else query_status[0]
+
+        if query_status is not None and query_status.value == "ERROR":
+            # remove failed query from cache
+            if self._last_query is not None:
+                self._last_query.remove_cache_file(self.cache_location)
+            # display error message
+            if not commons.ASTROPY_LT_5_3:
+                message = "".join(line.value for line in vo_tree.get_infos_by_name("Error"))
+            else:  # remove when support for astropy older than 5.3 is dropped
+                message = "".join(line.value for line in vo_tree.infos if line.name == "Error")
+            raise RemoteServiceError(message)
+
+    def _parse_vizier_votable(self, data, *, verbose=False, invalid='warn',
+                              get_catalog_names=False):
+        """
+        Given a votable as string, parse it into dict or tables
+        """
+        if not verbose:
+            commons.suppress_vo_warnings()
+
+        tf = BytesIO(data)
+
+        if invalid == 'mask':
+            vo_tree = votable.parse(tf, verify='warn', invalid='mask')
+        elif invalid == 'warn':
+            try:
+                vo_tree = votable.parse(tf, verify='warn', invalid='exception')
+            except Exception as ex:
+                warnings.warn("VOTABLE parsing raised exception: {0}".format(ex))
+                vo_tree = votable.parse(tf, verify='warn', invalid='mask')
+        elif invalid == 'exception':
+            vo_tree = votable.parse(tf, verify='warn', invalid='exception')
+        else:
+            raise ValueError("Invalid keyword for 'invalid'. "
+                             "Must be exception, mask, or warn")
+
+        self._raise_error_on_server_error(vo_tree)
+
+        if get_catalog_names:
+            return OrderedDict([(R.name, R) for R in vo_tree.resources])
+        else:
+            table_dict = OrderedDict()
+            for t in vo_tree.iter_tables():
+                if len(t.array) > 0:
+                    if t.ref is not None:
+                        name = vo_tree.get_table_by_id(t.ref).name
+                    else:
+                        name = t.name
+                    if name not in table_dict.keys():
+                        table_dict[name] = []
+                    table_dict[name] += [t.to_table(use_names_over_ids=True)]
+            for name in table_dict.keys():
+                if len(table_dict[name]) > 1:
+                    table_dict[name] = tbl.vstack(table_dict[name])
+                else:
+                    table_dict[name] = table_dict[name][0]
+            return commons.TableList(table_dict)
+
 
 def _parse_vizier_tsvfile(data, *, verbose=False):
     """
@@ -809,51 +905,6 @@ def _parse_vizier_tsvfile(data, *, verbose=False):
                          header_start=0, comment="#") for
               a, b in split_limits]
     return tables
-
-
-def _parse_vizier_votable(data, *, verbose=False, invalid='warn',
-                          get_catalog_names=False):
-    """
-    Given a votable as string, parse it into dict or tables
-    """
-    if not verbose:
-        commons.suppress_vo_warnings()
-
-    tf = BytesIO(data)
-
-    if invalid == 'mask':
-        vo_tree = votable.parse(tf, verify='warn', invalid='mask')
-    elif invalid == 'warn':
-        try:
-            vo_tree = votable.parse(tf, verify='warn', invalid='exception')
-        except Exception as ex:
-            warnings.warn("VOTABLE parsing raised exception: {0}".format(ex))
-            vo_tree = votable.parse(tf, verify='warn', invalid='mask')
-    elif invalid == 'exception':
-        vo_tree = votable.parse(tf, verify='warn', invalid='exception')
-    else:
-        raise ValueError("Invalid keyword for 'invalid'. "
-                         "Must be exception, mask, or warn")
-
-    if get_catalog_names:
-        return OrderedDict([(R.name, R) for R in vo_tree.resources])
-    else:
-        table_dict = OrderedDict()
-        for t in vo_tree.iter_tables():
-            if len(t.array) > 0:
-                if t.ref is not None:
-                    name = vo_tree.get_table_by_id(t.ref).name
-                else:
-                    name = t.name
-                if name not in table_dict.keys():
-                    table_dict[name] = []
-                table_dict[name] += [t.to_table(use_names_over_ids=True)]
-        for name in table_dict.keys():
-            if len(table_dict[name]) > 1:
-                table_dict[name] = tbl.vstack(table_dict[name])
-            else:
-                table_dict[name] = table_dict[name][0]
-        return commons.TableList(table_dict)
 
 
 def _parse_angle(angle):

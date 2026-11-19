@@ -10,6 +10,8 @@ from astropy.coordinates import SkyCoord
 from astropy.utils.exceptions import AstropyDeprecationWarning
 from astroquery.exceptions import NoResultsWarning
 
+import importlib.metadata
+from packaging.version import Version
 from pyvo.dal.exceptions import DALOverflowWarning
 
 from astroquery.heasarc import Heasarc
@@ -58,6 +60,7 @@ DEFAULT_COLS = [
 
 # The MAXREC related overflow message is different in pyvo 1.7+, remove workaround when we have it as a minimum
 overflow_message = r"Partial result set. Potential causes MAXREC|Result set limited by user- or server-supplied MAXREC"
+pyvo_version = Version(importlib.metadata.version('pyvo'))
 
 
 @pytest.mark.remote_data
@@ -91,7 +94,7 @@ class TestHeasarc:
         assert isinstance(result, Table)
         assert len(result) == 3
         # assert all columns are returned
-        assert len(result.colnames) == 53
+        assert len(result.colnames) == 54
 
     def test_query_columns_radius(self):
         """
@@ -156,6 +159,7 @@ class TestHeasarc:
         assert "rosmaster" in catalogs
         assert "rassmaster" in catalogs
 
+    @pytest.mark.skipif(pyvo_version >= Version('1.7'), reason="pyvo >= 1.7")
     def test_tap__maxrec(self):
         query = "SELECT TOP 10 ra,dec FROM xray"
         with pytest.warns(expected_warning=DALOverflowWarning, match=overflow_message):
@@ -176,9 +180,19 @@ class TestHeasarc:
             )
 
     def test_locate_data__xmmmaster(self):
-        links = Heasarc.locate_data(
-            Table({"__row": [4154, 4155]}), catalog_name="xmmmaster"
+        # Select two currently archived observations that are known
+        # to have data products at the HEASARC.
+        query = """
+        SELECT TOP 2 __row, obsid, name, status, data_in_heasarc
+        FROM xmmmaster
+        WHERE status = 'archived' AND data_in_heasarc = 'Y'
+        ORDER BY __row
+        """
+        tab = Heasarc.query_tap(query).to_table()
+        assert len(tab) == 2, (
+            "Could not find two archived xmmmaster observations with data"
         )
+        links = Heasarc.locate_data(tab, catalog_name="xmmmaster")
         assert len(links) == 2
         assert "access_url" in links.colnames
         assert "sciserver" in links.colnames

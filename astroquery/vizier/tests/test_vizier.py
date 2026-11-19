@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import os
+
 import requests
 from numpy import testing as npt
 import pytest
@@ -10,7 +11,7 @@ from astropy.table import Table
 import astropy.units as u
 
 from ... import vizier
-from ...exceptions import EmptyResponseError
+from ...exceptions import EmptyResponseError, RemoteServiceError, TableParseError
 from ...utils import commons
 from astroquery.utils.mocks import MockResponse
 from .conftest import scalar_skycoord, vector_skycoord
@@ -102,6 +103,19 @@ def test_parse_result_verbose(filepath, capsys):
     vizier.core.Vizier._parse_result(response)
     out, err = capsys.readouterr()
     assert out == ''
+
+
+def test_parse_result_invalid_votable():
+    # this doesn't parse as it's missing </ns0:VOTABLE> in the end
+    mock_invalid_votable = MockResponse(
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<ns0:VOTABLE xmlns:ns0="http://www.ivoa.net/xml/VOTable/v1.3" '
+        b'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+        b'version="1.4" xsi:schemaLocation="http://www.ivoa.net/xml/VOTable/v1.3 '
+        b'http://www.ivoa.net/xml/VOTable/v1.3">'
+    )
+    with pytest.raises(TableParseError, match="Failed to parse"):
+        vizier.VizierClass()._parse_result(mock_invalid_votable, invalid="exception")
 
 
 @pytest.mark.parametrize(('filepath', 'objlen'),
@@ -290,3 +304,66 @@ class TestVizierClass:
                             return_empty_votable)
         with pytest.raises(EmptyResponseError, match="'*' was not found in VizieR*"):
             v.get_catalog_metadata()
+
+
+def test_query_error_response(monkeypatch):
+    """Checks that an error response from the server raises an error."""
+    with open(data_path("no_server_error.xml"), 'rb') as f:
+        error_content = f.read()
+
+    def mock_request(method, url, req_data=None, timeout=10, files=None,
+                     params=None, headers=None, **kwargs):
+        return MockResponse(error_content)
+
+    monkeypatch.setattr(requests.Session, 'request', mock_request)
+
+    v = vizier.core.Vizier()
+    with pytest.raises(RemoteServiceError,
+                       match="The database is not currently reachable"):
+        v.query_region(scalar_skycoord, radius=5 * u.deg)
+
+
+def _patch_probe(monkeypatch, chosen):
+    calls = []
+
+    def fake(servers, path="/", timeout=1.0):
+        calls.append((list(servers), path, timeout))
+        return chosen, {chosen: 0.123}
+
+    monkeypatch.setattr(commons, "find_fastest_mirror", fake)
+    return calls
+
+
+def test_vizier_servers_list():
+    v = vizier.Vizier()
+    assert v.servers_list == list(vizier.conf.servers_list)
+    v.servers_list.append("fake")  # a copy, so conf is untouched
+    assert "fake" not in vizier.conf.servers_list
+    assert v.VIZIER_SERVER == vizier.conf.servers_list[0]
+
+
+def test_vizier_find_mirror(monkeypatch, caplog):
+    calls = _patch_probe(monkeypatch, "vizier.nao.ac.jp")
+    v = vizier.Vizier(find_mirror=True)
+    assert v.VIZIER_SERVER == "vizier.nao.ac.jp"
+    assert v._server_to_url().startswith("https://vizier.nao.ac.jp/viz-bin/")
+    assert calls == [(list(vizier.conf.servers_list), "/viz-bin/votable", 1.0)]
+    assert "Using VizieR mirror vizier.nao.ac.jp (0.12s)" in caplog.text
+
+
+def test_vizier_find_mirror_method_returns_server(monkeypatch):
+    _patch_probe(monkeypatch, "vizier.nao.ac.jp")
+    v = vizier.Vizier()
+    assert v.find_mirror(timeout=2) == "vizier.nao.ac.jp"
+    assert v.VIZIER_SERVER == "vizier.nao.ac.jp"
+
+
+def test_vizier_no_probe_by_default(monkeypatch):
+    calls = _patch_probe(monkeypatch, "vizier.nao.ac.jp")
+    vizier.Vizier()
+    assert calls == []
+
+
+def test_vizier_server_config_alias():
+    """The CDS mirror instructions tell users to set ``vizier_server`` in astroquery.cfg."""
+    assert "astroquery.vizier.vizier_server" in vizier.conf.__class__.server.aliases
