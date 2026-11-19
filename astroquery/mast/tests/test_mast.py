@@ -6,6 +6,7 @@ import json
 import os
 import re
 import warnings
+from datetime import datetime
 from pathlib import Path
 from shutil import copyfile
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import astropy.units as u
 import numpy as np
 import pytest
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import Angle, SkyCoord
 from astropy.io import fits
 from astropy.io.votable import from_table, parse
 from astropy.table import Table, unique
@@ -27,8 +28,8 @@ from requests import HTTPError, Response
 
 from astroquery.exceptions import (AuthenticationWarning, BlankResponseWarning, InputWarning, InvalidQueryError,
                                    MaxResultsWarning, NoResultsWarning, RemoteServiceError, ResolverError)
-from astroquery.mast import (Catalogs, MastMissions, Observations, Tesscut, Zcut, Mast, utils, services,
-                             discovery_portal, auth, core, cloud)
+from astroquery.mast import (Catalog, CatalogColumn, Catalogs, MastMissions, Observations, Tesscut, Zcut, Mast,
+                             utils, services, discovery_portal, auth, core, cloud)
 from astroquery.mast.cloud import CloudAccess
 from astroquery.mast import missions as missions_module
 from astroquery.mast.cutouts import _parse_cutout_size
