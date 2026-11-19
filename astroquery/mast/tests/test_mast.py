@@ -338,7 +338,7 @@ def vo_tap_mock():
             # Queries to get catalogs
             filename = data_path(DATA_FILES['tap_catalogs'])
             catalog_table = parse(filename).get_first_table().to_table()
-            catalog_table.add_row(["dbo.catalogrecord2", "Second catalog for crossmatch tests"])
+            catalog_table.add_row(["tic_v82.source2", "Second catalog for crossmatch tests"])
             return TAPResults(from_table(catalog_table))
         elif 'tap_schema.columns' in query:
             # Queries to get column metadata
@@ -402,7 +402,6 @@ def get_patch_tap_query(patch_tap, run_async=False):
         args, _ = patch_tap.run_sync.call_args
     query = args[0]
     return query
-
 
 ###########################
 # MissionSearchClass Test #
@@ -2125,9 +2124,11 @@ def test_catalogs_crossmatch(patch_tap):
     def crossmatch_tic_pair(**kwargs):
         kwargs.pop("collection_1", None)
         kwargs.pop("collection_2", None)
-        kwargs.setdefault("catalog_1", "dbo.CatalogRecord")
-        kwargs.setdefault("catalog_2", "dbo.CatalogRecord2")
-        return Catalogs.crossmatch(collection_1="tic", collection_2="tic", **kwargs)
+        kwargs.setdefault("catalog_1", "tic_v82.source")
+        kwargs.setdefault("catalog_2", "tic_v82.source2")
+        kwargs.setdefault("alias_1", "tic_1")
+        kwargs.setdefault("alias_2", "tic_2")
+        return Catalogs.crossmatch(collection_1="tic_v82", collection_2="tic_v82", **kwargs)
 
     # Distinct catalog names share the test fixture's TAP endpoint and metadata.
     result = crossmatch_tic_pair(
@@ -2141,28 +2142,28 @@ def test_catalogs_crossmatch(patch_tap):
     assert len(result) > 0
     query = get_patch_tap_query(patch_tap)
     assert "TOP 2" in query
-    assert "FROM (SELECT * FROM dbo.catalogrecord WHERE CONTAINS" in query
-    assert "JOIN dbo.catalogrecord2 AS tic_2" in query
+    assert "FROM (SELECT * FROM tic_v82.source WHERE CONTAINS" in query
+    assert "JOIN tic_v82.source2 AS tic_2" in query
     assert "DISTANCE(POINT('ICRS', tic_1.ra, tic_1.dec), POINT('ICRS', tic_2.ra, tic_2.dec)) <" in query
     assert "adql_query" in result.meta
-    assert result.meta["collection1"] == "tic"
-    assert result.meta["collection2"] == "tic"
+    assert result.meta["collection1"] == "tic_v82"
+    assert result.meta["collection2"] == "tic_v82"
 
     # If one catalog is omitted, the instance's current catalog supplies it.
-    tic_catalogs = Catalogs("tic")
+    tic_catalogs = Catalogs("tic_v82")
     result = tic_catalogs.crossmatch(
-        collection_1="tic",
-        catalog_1="dbo.CatalogRecord2",
+        collection_1="tic_v82",
+        catalog_1="tic_v82.source2",
         coordinates=regionCoords,
     )
-    assert result.meta["collection1"] == "tic"
-    assert result.meta["collection2"] == tic_catalogs.collection
-    assert result.meta["catalog2"] == tic_catalogs.catalog
+    assert result.meta["collection1"] == "tic_v82"
+    assert result.meta["collection2"] == "tic_v82"
+    assert result.meta["catalog2"] == "tic_v82.source"
 
     # Return ADQL only
     adql = crossmatch_tic_pair(coordinates=regionCoords, return_adql=True)
     assert isinstance(adql, str)
-    assert "JOIN dbo.catalogrecord2 AS tic_2" in adql
+    assert "JOIN tic_v82.source2 AS tic_2" in adql
 
     # Count only
     count = crossmatch_tic_pair(coordinates=regionCoords, count_only=True)
@@ -2212,7 +2213,7 @@ def test_catalogs_crossmatch(patch_tap):
         messages = [str(w.message) for w in record]
         assert not any("may be slow or time out" in m for m in messages)
     query = get_patch_tap_query(patch_tap)
-    assert "FROM dbo.catalogrecord AS tic_1" in query
+    assert "FROM tic_v82.source AS tic_1" in query
     assert "CONTAINS" not in query
 
     # No spatial constraint and no criteria: warns that the query is unconstrained
@@ -2448,24 +2449,26 @@ def test_catalogs_invalid_crossmatch(patch_tap):
     def crossmatch_tic_pair(**kwargs):
         kwargs.pop("collection_1", None)
         kwargs.pop("collection_2", None)
-        kwargs.setdefault("catalog_1", "dbo.CatalogRecord")
-        kwargs.setdefault("catalog_2", "dbo.CatalogRecord2")
-        return Catalogs.crossmatch(collection_1="tic", collection_2="tic", **kwargs)
+        kwargs.setdefault("catalog_1", "tic_v82.source")
+        kwargs.setdefault("catalog_2", "tic_v82.source2")
+        kwargs.setdefault("alias_1", "tic_1")
+        kwargs.setdefault("alias_2", "tic_2")
+        return Catalogs.crossmatch(collection_1="tic_v82", collection_2="tic_v82", **kwargs)
 
     # Reject the same fully qualified table, even if the identifiers differ only in case.
     with pytest.raises(InvalidQueryError, match="with itself"):
         Catalogs.crossmatch(
-            collection_1="tic",
-            catalog_1="dbo.CatalogRecord",
-            collection_2="tic",
-            catalog_2="DBO.CATALOGRECORD",
+            collection_1="tic_v82",
+            catalog_1="tic_v82.source",
+            collection_2="tic_v82",
+            catalog_2="TIC_V82.SOURCE",
             coordinates=regionCoords,
         )
 
     # Catalogs from different TAP endpoints cannot be crossmatched
     with pytest.raises(InvalidQueryError, match="served by different"):
         Catalogs.crossmatch(
-            collection_1="tic",
+            collection_1="tic_v82",
             collection_2="hsc",
             coordinates=regionCoords,
         )
@@ -2484,7 +2487,7 @@ def test_catalogs_invalid_crossmatch(patch_tap):
 
 
 def test_catalogs_crossmatch_usability(patch_tap, monkeypatch):
-    catalogs = (("tic", "dbo.CatalogRecord"), ("tic", "dbo.CatalogRecord2"))
+    catalogs = (("tic_v82", "tic_v82.source"), ("tic_v82", "tic_v82.source2"))
     adql = Catalogs.crossmatch(
         catalogs=catalogs, coordinates=regionCoords, return_adql=True,
         alias_1="first", alias_2="second", select_cols=["cat1.ra", "CAT2.dec"],
@@ -2500,6 +2503,7 @@ def test_catalogs_crossmatch_usability(patch_tap, monkeypatch):
 
     adql = Catalogs.crossmatch(
         catalogs=catalogs, coordinates=regionCoords, return_adql=True,
+        alias_1="tic_1", alias_2="tic_2",
         select_cols="cat1.ra, cat2.dec",
     )
     assert "tic_1.ra, tic_2.dec" in adql
@@ -2520,8 +2524,10 @@ def test_catalogs_crossmatch_usability(patch_tap, monkeypatch):
     monkeypatch.setattr(CatalogCollection, "run_tap_query", lambda *args, **kwargs: Table({
         "ra": [10.0], "ra2": [10.0001], "separation": [0.36],
     }))
-    result = Catalogs.crossmatch(catalogs=catalogs, coordinates=regionCoords,
-                                 select_cols=["cat1.ra", "cat2.ra"])
+    result = Catalogs.crossmatch(
+        catalogs=catalogs, coordinates=regionCoords, alias_1="tic_1", alias_2="tic_2",
+        select_cols=["cat1.ra", "cat2.ra"],
+    )
     assert result.colnames == ["tic_1.ra", "tic_2.ra", "separation"]
     assert result["separation"].unit == u.arcsec
     assert result.meta["alias1"] == "tic_1"
@@ -2539,8 +2545,9 @@ def test_catalogs_crossmatch_usability(patch_tap, monkeypatch):
 @pytest.mark.parametrize("use_filters", [False, True])
 def test_catalogs_crossmatch_underscore_filters(patch_tap, criteria, aliases, expected, use_filters):
     kwargs = {"filters": criteria} if use_filters else criteria
+    aliases = {"alias_1": "tic_1", "alias_2": "tic_2", **aliases}
     adql = Catalogs.crossmatch(
-        catalogs=(("tic", "dbo.CatalogRecord"), ("tic", "dbo.CatalogRecord2")),
+        catalogs=(("tic_v82", "tic_v82.source"), ("tic_v82", "tic_v82.source2")),
         coordinates=regionCoords, return_adql=True, **aliases, **kwargs,
     )
     for predicate in expected:
@@ -2555,7 +2562,8 @@ def test_catalogs_crossmatch_underscore_filters(patch_tap, criteria, aliases, ex
 def test_catalogs_crossmatch_duplicate_filter_aliases(patch_tap, criteria):
     with pytest.raises(InvalidQueryError, match="specified more than once"):
         Catalogs.crossmatch(
-            catalogs=(("tic", "dbo.CatalogRecord"), ("tic", "dbo.CatalogRecord2")),
+            catalogs=(("tic_v82", "tic_v82.source"), ("tic_v82", "tic_v82.source2")),
+            alias_1="tic_1", alias_2="tic_2",
             coordinates=regionCoords, return_adql=True, filters=criteria,
         )
 
@@ -2563,7 +2571,8 @@ def test_catalogs_crossmatch_duplicate_filter_aliases(patch_tap, criteria):
 def test_catalogs_crossmatch_duplicate_filter_kwargs(patch_tap):
     with pytest.raises(InvalidQueryError, match="specified more than once"):
         Catalogs.crossmatch(
-            catalogs=(("tic", "dbo.CatalogRecord"), ("tic", "dbo.CatalogRecord2")),
+            catalogs=(("tic_v82", "tic_v82.source"), ("tic_v82", "tic_v82.source2")),
+            alias_1="tic_1", alias_2="tic_2",
             coordinates=regionCoords, return_adql=True,
             cat1_ra=10, filters={"tic_1.ra": 20},
         )
@@ -2612,9 +2621,10 @@ def test_catalogs_crossmatch_relabel_columns():
     (["survey_a_bmag"], {"alias_1": "survey", "alias_2": "survey_a"}, "survey_a.bmag"),
 ])
 def test_catalogs_crossmatch_underscore_select_cols(patch_tap, select_cols, aliases, expected):
+    aliases = {"alias_1": "tic_1", "alias_2": "tic_2", **aliases}
     adql = Catalogs.crossmatch(
-        collection_1="tic", catalog_1="dbo.CatalogRecord",
-        collection_2="tic", catalog_2="dbo.CatalogRecord2",
+        collection_1="tic_v82", catalog_1="tic_v82.source",
+        collection_2="tic_v82", catalog_2="tic_v82.source2",
         coordinates=regionCoords, return_adql=True, select_cols=select_cols, **aliases,
     )
     assert expected in adql
@@ -2631,9 +2641,10 @@ def test_catalogs_crossmatch_underscore_select_cols(patch_tap, select_cols, alia
     ("survey_a_bmag", {"alias_1": "survey", "alias_2": "survey_a"}, False, "survey_a.bmag ASC"),
 ])
 def test_catalogs_crossmatch_sort_column_forms(patch_tap, sort_by, aliases, sort_desc, expected):
+    aliases = {"alias_1": "tic_1", "alias_2": "tic_2", **aliases}
     adql = Catalogs.crossmatch(
-        collection_1="tic", catalog_1="dbo.CatalogRecord",
-        collection_2="tic", catalog_2="dbo.CatalogRecord2",
+        collection_1="tic_v82", catalog_1="tic_v82.source",
+        collection_2="tic_v82", catalog_2="tic_v82.source2",
         coordinates=regionCoords, return_adql=True,
         sort_by=sort_by, sort_desc=sort_desc, **aliases,
     )
@@ -2643,47 +2654,48 @@ def test_catalogs_crossmatch_sort_column_forms(patch_tap, sort_by, aliases, sort
 def test_catalogs_crossmatch_invalid_underscore_sort_column(patch_tap):
     with pytest.raises(InvalidQueryError, match="not found"):
         Catalogs.crossmatch(
-            collection_1="tic", catalog_1="dbo.CatalogRecord",
-            collection_2="tic", catalog_2="dbo.CatalogRecord2",
+            collection_1="tic_v82", catalog_1="tic_v82.source",
+            collection_2="tic_v82", catalog_2="tic_v82.source2",
+            alias_1="tic_1", alias_2="tic_2",
             coordinates=regionCoords, return_adql=True, sort_by="cat2_nonexistent",
         )
 
 
 def test_catalogs_crossmatch_collection_catalogs(patch_tap):
     # Collection-only shorthand uses that collection's default, not the instance catalog.
-    instance = Catalogs("tic", catalog="dbo.CatalogRecord2")
+    instance = Catalogs("tic_v82", catalog="tic_v82.source2")
     adql = instance.crossmatch(
-        catalogs=("tic", ("tic", "dbo.CatalogRecord2")), coordinates=regionCoords,
+        catalogs=("tic_v82", ("tic_v82", "tic_v82.source2")), coordinates=regionCoords,
         select_cols=["cat1.ra"], return_adql=True,
     )
-    assert "FROM (SELECT * FROM dbo.catalogrecord WHERE" in adql
-    assert instance.catalog == "dbo.catalogrecord2"
+    assert "FROM (SELECT * FROM tic_v82.source WHERE" in adql
+    assert instance.catalog == "tic_v82.source2"
 
 
 @pytest.mark.parametrize("kwargs, message", [
     ({}, "Specify two catalogs"),
     ({"catalogs": "tic"}, "exactly two"),
-    ({"catalogs": ("tic",)}, "exactly two"),
-    ({"catalogs": (None, "tic")}, "Each target"),
-    ({"catalogs": ("tic", "tic"), "collection_1": "tic"}, "not both"),
-    ({"collection_1": "tic", "coordinates": regionCoords, "region": "CIRCLE 10 20 1"}, "only one"),
-    ({"collection_1": "tic", "coordinates": regionCoords, "object_name": "M31"}, "only one"),
-    ({"collection_1": "tic", "object_name": "M31", "region": "CIRCLE 10 20 1"}, "only one"),
-    ({"collection_1": "tic", "match_radius": 0}, "match_radius"),
-    ({"collection_1": "tic", "match_radius": -1 * u.arcsec}, "match_radius"),
-    ({"collection_1": "tic", "match_radius": np.inf}, "match_radius"),
-    ({"collection_1": "tic", "match_radius": np.nan}, "match_radius"),
-    ({"collection_1": "tic", "match_radius": [1, 2] * u.arcsec}, "match_radius"),
-    ({"collection_1": "tic", "match_radius": 1 * u.m}, "match_radius"),
-    ({"collection_1": "tic", "match_radius": 6 * u.arcsec}, "match_radius"),
-    ({"collection_1": "tic", "coordinates": regionCoords, "search_radius": -1}, "search_radius"),
-    ({"collection_1": "tic", "coordinates": regionCoords, "search_radius": 31 * u.arcmin}, "search_radius"),
-    ({"collection_1": "tic", "limit": 0}, "limit"),
-    ({"collection_1": "tic", "limit": 1.5}, "limit"),
-    ({"collection_1": "tic", "limit": True}, "limit"),
-    ({"collection_1": "tic", "offset": -1}, "offset"),
-    ({"collection_1": "tic", "offset": False}, "offset"),
-    ({"collection_1": "tic", "alias_1": "a;drop"}, "ADQL identifier"),
+    ({"catalogs": ("tic_v82",)}, "exactly two"),
+    ({"catalogs": (None, "tic_v82")}, "Each target"),
+    ({"catalogs": ("tic_v82", "tic_v82"), "collection_1": "tic_v82"}, "not both"),
+    ({"collection_1": "tic_v82", "coordinates": regionCoords, "region": "CIRCLE 10 20 1"}, "only one"),
+    ({"collection_1": "tic_v82", "coordinates": regionCoords, "object_name": "M31"}, "only one"),
+    ({"collection_1": "tic_v82", "object_name": "M31", "region": "CIRCLE 10 20 1"}, "only one"),
+    ({"collection_1": "tic_v82", "match_radius": 0}, "match_radius"),
+    ({"collection_1": "tic_v82", "match_radius": -1 * u.arcsec}, "match_radius"),
+    ({"collection_1": "tic_v82", "match_radius": np.inf}, "match_radius"),
+    ({"collection_1": "tic_v82", "match_radius": np.nan}, "match_radius"),
+    ({"collection_1": "tic_v82", "match_radius": [1, 2] * u.arcsec}, "match_radius"),
+    ({"collection_1": "tic_v82", "match_radius": 1 * u.m}, "match_radius"),
+    ({"collection_1": "tic_v82", "match_radius": 6 * u.arcsec}, "match_radius"),
+    ({"collection_1": "tic_v82", "coordinates": regionCoords, "search_radius": -1}, "search_radius"),
+    ({"collection_1": "tic_v82", "coordinates": regionCoords, "search_radius": 31 * u.arcmin}, "search_radius"),
+    ({"collection_1": "tic_v82", "limit": 0}, "limit"),
+    ({"collection_1": "tic_v82", "limit": 1.5}, "limit"),
+    ({"collection_1": "tic_v82", "limit": True}, "limit"),
+    ({"collection_1": "tic_v82", "offset": -1}, "offset"),
+    ({"collection_1": "tic_v82", "offset": False}, "offset"),
+    ({"collection_1": "tic_v82", "alias_1": "a;drop"}, "ADQL identifier"),
 ])
 def test_catalogs_crossmatch_early_validation(patch_tap, kwargs, message):
     patch_tap.run_sync.reset_mock()
@@ -2714,9 +2726,10 @@ def test_catalogs_crossmatch_radius_limits(name, radius):
     ({"sort_by": "separation", "include_separation": False}, "not found"),
 ])
 def test_catalogs_crossmatch_column_validation(patch_tap, kwargs, message):
+    kwargs = {"alias_1": "tic_1", "alias_2": "tic_2", **kwargs}
     with pytest.raises(InvalidQueryError, match=message):
         Catalogs.crossmatch(
-            catalogs=(("tic", "dbo.CatalogRecord"), ("tic", "dbo.CatalogRecord2")),
+            catalogs=(("tic_v82", "tic_v82.source"), ("tic_v82", "tic_v82.source2")),
             coordinates=regionCoords, return_adql=True, **kwargs,
         )
 
@@ -2724,8 +2737,10 @@ def test_catalogs_crossmatch_column_validation(patch_tap, kwargs, message):
 def test_catalogs_get_crossmatch_catalogs(patch_tap, monkeypatch):
     candidates = Catalogs.get_crossmatch_catalogs("tic")
     assert candidates.colnames == ["collection_name", "catalog_name"]
-    assert candidates["catalog_name"].tolist() == ["dbo.catalogrecord2"]
-    assert candidates["collection_name"].tolist() == ["tic"]
+    assert set(zip(candidates["collection_name"], candidates["catalog_name"])) == {
+        ("tic", "tic_v82.source2"),
+        ("tic", "tic_v82.source"),
+    }
 
     # No coordinate columns: return a correctly typed empty table.
     metadata = CatalogMetadata(Table(), None, None, False)
