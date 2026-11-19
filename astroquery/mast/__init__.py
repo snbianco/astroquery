@@ -36,6 +36,7 @@ conf = Conf()
 
 from . import utils
 from .collections import Catalogs, CatalogsClass
+from .catalog import Catalog, CatalogColumn
 from .cutouts import Hapcut, HapcutClass, Tesscut, TesscutClass, Zcut, ZcutClass
 from .missions import MastMissions, MastMissionsClass
 from .observations import Mast, MastClass, Observations, ObservationsClass
@@ -45,6 +46,8 @@ __all__ = [
     "ObservationsClass",
     "Catalogs",
     "CatalogsClass",
+    "Catalog",
+    "CatalogColumn",
     "MastMissions",
     "MastMissionsClass",
     "Mast",
