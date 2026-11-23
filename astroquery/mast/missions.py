@@ -464,6 +464,8 @@ class MastMissionsClass(MastQueryWithLogin):
             If None, a default set of columns will be returned.
             Can either be an iterable of column names, a comma-separated string of column names,
             or 'all'/'*' to return all available columns.
+            For Roman, ``pass_id`` may be used as an alias for ``pass`` in both
+            ``select_cols`` and ``sort_by``.
         resolver : str, optional
             Default is None. The resolver to use when resolving a named target into coordinates. Valid options are
             "SIMBAD" and "NED". If not specified, the default resolver order will be used. Please see the
@@ -533,6 +535,10 @@ class MastMissionsClass(MastQueryWithLogin):
 
         self._build_params_from_criteria(params, **criteria)
 
+        columns = self.columns[mission]['name']
+        if isinstance(params.get('sort_by'), (list, tuple)) and 'pass' in columns and 'pass_id' not in columns:
+            params['sort_by'] = ['pass' if col == 'pass_id' else col for col in params['sort_by']]
+
         return self._service_api_connection.missions_request_async(self.service, params, mission)
 
     @class_or_instance
@@ -562,6 +568,8 @@ class MastMissionsClass(MastQueryWithLogin):
             If None, a default set of columns will be returned.
             Can either be an iterable of column names, a comma-separated string of column names,
             or 'all'/'*' to return all available columns.
+            For Roman, ``pass_id`` may be used as an alias for ``pass`` in both
+            ``select_cols`` and ``sort_by``.
         mission : str, optional
             The mission for which to query. If not provided, the current value of the
             ``mission`` attribute will be used.
@@ -622,6 +630,8 @@ class MastMissionsClass(MastQueryWithLogin):
             If None, a default set of columns will be returned.
             Can either be an iterable of column names, a comma-separated string of column names,
             or 'all'/'*' to return all available columns.
+            For Roman, ``pass_id`` may be used as an alias for ``pass`` in both
+            ``select_cols`` and ``sort_by``.
         resolver : str, optional
             Default is None. The resolver to use when resolving a named target into coordinates. Valid options are
             "SIMBAD" and "NED". If not specified, the default resolver order will be used. Please see the
@@ -1430,6 +1440,8 @@ class MastMissionsClass(MastQueryWithLogin):
                     "`select_cols` must contain only strings (column names)."
                 )
             col = col.strip()
+            if col == 'pass_id' and 'pass_id' not in all_columns and 'pass' in all_columns:
+                col = 'pass'
             if col not in all_columns:
                 closest_match = difflib.get_close_matches(col, all_columns, n=1)
                 suggestion = f' Did you mean "{closest_match[0]}"?' if closest_match else ''
