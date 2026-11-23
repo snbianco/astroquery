@@ -473,6 +473,31 @@ def test_missions_query_criteria_async(mocker):
     assert 'count_only' not in data
 
 
+@pytest.mark.parametrize('select_cols, sort_by', [
+    ('pass_id', 'pass_id'),
+    ('pass', 'pass'),
+    ('pass, pass_id', ['pass', 'pass_id']),
+    (['pass', 'pass_id'], ['pass', 'pass_id']),
+])
+@pytest.mark.parametrize('has_pass_id', [False, True])
+def test_missions_query_pass_column_alias(mocker, select_cols, sort_by, has_pass_id):
+    missions = MastMissions(mission='hst')
+    columns = ['pass', 'pass_id'] if has_pass_id else ['pass']
+    missions.columns['roman'] = Table({'name': columns})
+    request = mocker.patch.object(missions._service_api_connection, 'missions_request_async')
+
+    missions.query_criteria_async(select_cols=select_cols, sort_by=sort_by, mission='roman')
+
+    params = request.call_args.args[1]
+    selected = [col.strip() for col in select_cols.split(',')] if isinstance(select_cols, str) else select_cols
+    sorted_cols = [sort_by] if isinstance(sort_by, str) else sort_by
+    if not has_pass_id:
+        selected = ['pass' if col == 'pass_id' else col for col in selected]
+        sorted_cols = ['pass' if col == 'pass_id' else col for col in sorted_cols]
+    assert params['select_cols'][:len(selected)] == selected
+    assert params['sort_by'] == sorted_cols
+
+
 def test_missions_query_criteria_async_with_missing_results():
     with pytest.raises(KeyError):
         responses = MastMissions.query_criteria_async(

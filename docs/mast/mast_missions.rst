@@ -231,6 +231,8 @@ Criteria syntax supports several operations:
 
   For the Roman mission, query methods also support the ``pass_id`` parameter as an alias for the ``pass`` column,
   which refers to a single iteration of a pass plan. This is to avoid conflicts with the reserved Python keyword.
+  Both ``pass`` and ``pass_id`` can also be used in ``select_cols`` and ``sort_by``; the returned column is named
+  ``pass``. If the mission has an actual ``pass_id`` column, that name refers to the actual column instead.
 
 .. doctest-remote-data::
 
