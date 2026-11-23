@@ -49,12 +49,14 @@ Accessing Proprietary Data
 
 To access exclusive data that is not publicly available, users may log into their
 `MyST Account <https://archive.stsci.edu/registration/index.html>`_.
-Each of the MAST query clases has a `~astroquery.mast.MastClass.login` function that allows users to authenticate
-using a token. If a token is not supplied, the user will be prompted to enter one. Alternatively,
+Each of the MAST query classes has a `~astroquery.mast.MastClass.login` function that allows users to authenticate
+with a token. If a token is not supplied, the user will be prompted to enter one. Alternatively,
 a query class may be initialized with the ``mast_token`` parameter set to a valid token string.
 
 To view the authentication tokens associated with your account, visit the
 `MAST authentication information page <https://auth.mast.stsci.edu/info>`__.
+
+Below, we show how to login to the Observations class and then retrieve information about the session:
 
 .. doctest-skip::
 
@@ -69,7 +71,7 @@ To view the authentication tokens associated with your account, visit the
    ...
 
 For security reasons, authentication tokens should not be hard-coded into scripts or Jupyter
-notebooks. Instead, users should enter tokens using a secure input method such as
+notebooks. Instead, users should enter tokens with a secure input method such as
 `~getpass.getpass`, which prevents the token from being displayed or logged.
 
 MAST authentication tokens expire after **10 days of inactivity**. Each time a token is used
@@ -97,19 +99,19 @@ Valid options for the ``resolver`` parameter are "SIMBAD" and "NED".
 
 The return value depends on whether ``resolve_all`` is set and whether the input is a single object name or multiple names:
 
-* If ``resolve_all`` is **False** and a single object is passed, returns a `~astropy.coordinates.SkyCoord` object with
+* If ``resolve_all`` is **False** and a single object is passed in, it returns a `~astropy.coordinates.SkyCoord` object with
   the resolved coordinates.
-* If ``resolve_all`` is **True** and a single object is passed, returns a dictionary where the keys are the resolver
+* If ``resolve_all`` is **True** and a single object is passed in, it returns a dictionary whose keys are the resolver
   names and the values are `~astropy.coordinates.SkyCoord` objects with the resolved coordinates.
-* If ``resolve_all`` is **False** and multiple objects are passed, returns a dictionary where the keys are the object
+* If ``resolve_all`` is **False** and multiple objects are passed in, it returns a dictionary whose keys are the object
   names and the values are `~astropy.coordinates.SkyCoord` objects with the resolved coordinates.
-* If ``resolve_all`` is **True** and multiple objects are passed, returns a dictionary where the keys are the object
+* If ``resolve_all`` is **True** and multiple objects are passed in, it returns a dictionary whose keys are the object
   names and the values are nested dictionaries. In each nested dictionary, the keys are the resolver names and the
   values are `~astropy.coordinates.SkyCoord` objects with the resolved coordinates.
 
 When multiple object names are provided, they are automatically split into batches of up to 30 names per request
 to the SANTA service. This avoids timeouts and ensures reliable responses. Large input lists are therefore resolved
-across multiple requests, with results combined into the final return object.
+across multiple requests, and the results are then combined into the final return object.
 
 .. doctest-remote-data::
    
@@ -119,7 +121,7 @@ across multiple requests, with results combined into the final return object.
    ...
    >>> # Resolve a single object
    >>> coords = mast.resolve_object("M101", resolver="NED")
-   >>> print(coords)  # doctest: +IGNORE_OUTPUT
+   >>> pprint(coords)  # doctest: +IGNORE_OUTPUT
    <SkyCoord (ICRS): (ra, dec) in deg
        (210.80227, 54.34895)>
    ...

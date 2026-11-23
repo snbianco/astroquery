@@ -47,9 +47,6 @@ including their positions, magnitudes, and other properties.
    >>> print("Default catalog:", Catalogs.catalog)
    Default catalog: dbo.SumMagAper2CatView
 
-These attributes may be changed at any time to set new defaults. Both ``collection`` and ``catalog`` will be validated
-when set. When changing the collection, the catalog will be reset to the default for the new collection.
-
 These attributes can be set with parameters when instantiating a `~astroquery.mast.CatalogsClass` object, or they can be changed
 at any time after instantiation to set new defaults for subsequent queries. Both ``collection`` and ``catalog`` will be validated when set.
 ``collection`` must be a valid collection name, and ``catalog`` must be a valid catalog within the specified collection. When changing the
@@ -92,7 +89,7 @@ Discovering Available Collections
 ----------------------------------
 
 To list all of the catalog collections that are accessible via the MAST TAP Service, use the `~astroquery.mast.CatalogsClass.get_collections` method.
-This returns an `~astropy.table.Table` containing the names of all available collections.
+This returns a `~astropy.table.Table` containing the names of all available collections.
 
 .. doctest-remote-data::
 
@@ -129,7 +126,7 @@ Discovering Catalogs Within a Collection
 -----------------------------------------
 
 Once a collection is selected, you can discover which catalogs are available within that collection using the
-`~astroquery.mast.CatalogsClass.get_catalogs` method. This returns an `~astropy.table.Table` containing names and descriptions of the catalogs
+`~astroquery.mast.CatalogsClass.get_catalogs` method. This returns a `~astropy.table.Table` containing names and descriptions of the catalogs
 within the currently selected collection. To query catalogs for a specific collection without changing the class state, you can pass the
 collection name as an argument to the method.
 
@@ -158,7 +155,7 @@ information about the columns in the catalog (e.g., their names, data types, and
 Inspecting Catalog Columns
 ---------------------------
 
-Use the `~astroquery.mast.CatalogsClass.get_column_metadata` method to inspect the columns of a catalog. This returns an `~astropy.table.Table`
+Use the `~astroquery.mast.CatalogsClass.get_column_metadata` method to inspect the columns of a catalog. This returns a `~astropy.table.Table`
 with information about each column, including its name, data type, unit, and a description. This metadata is crucial for constructing valid queries,
 selecting columns of interest, and understanding which columns support different criteria syntax.
 
@@ -200,8 +197,8 @@ Querying Catalogs
 `~astroquery.mast.CatalogsClass` provides three main methods for querying catalogs:
 
 - `~astroquery.mast.CatalogsClass.query_criteria` is the most flexible method. It supports purely column-based queries, purely spatial queries, or a combination of both.
-- `~astroquery.mast.CatalogsClass.query_region` is a convenience method for spatial queries that use coordinates or a region on the sky.
-- `~astroquery.mast.CatalogsClass.query_object` is a convenience method for spatial queries that use an object name resolved to coordinates.
+- `~astroquery.mast.CatalogsClass.query_region` is a convenience method for spatial queries that uses coordinates or a region on the sky.
+- `~astroquery.mast.CatalogsClass.query_object` is a convenience method for spatial queries that uses an object name resolved to coordinates.
 
 All three methods ultimately construct and execute an ADQL query against the MAST TAP service. All three support column-based filtering, sorting, and
 limiting of results. The primary difference between them is whether and how spatial criteria are specified.
@@ -211,21 +208,28 @@ Shared Query Parameters
 
 The following parameters are shared across all three query methods:
 
-- ``collection`` : The name of the catalog collection to query. If not specified, the ``collection`` class attribute will be used as the default.
-- ``collection``: The name of the catalog collection to query. If not specified, the ``collection`` class attribute will be used as the default.
-- ``catalog``: The name of the catalog to query within the specified collection. If not specified, the ``catalog`` class attribute will be used as the default.
+- ``collection``: The name of the catalog collection to query. If not specified, the ``collection``
+  class attribute will be used as the default.
+- ``catalog``: The name of the catalog to query within the specified collection. If not specified,
+  the ``catalog`` class attribute will be used as the default.
 - ``limit``: An integer specifying the maximum number of results to return. The default is 5,000.
-- ``offset``: An integer specifying the number of results to skip before starting to return results. This is useful for paginating through large result sets. Default is 0.
-- ``count_only``: A boolean indicating whether to return only the count of matching results instead of the results themselves. Default is False.
-- ``select_cols``: A list of column names to include in the results. If not specified, all columns will be returned.
-- ``sort_by``: A string or list of strings specifying the column(s) to sort the results by. Default is None (no sorting).
-- ``sort_desc``: A boolean or list of booleans specifying whether to sort in descending order for each column specified in ``sort_by``.
-   Default is False (ascending order).
-- ``filters``: Another parameter used to specify criteria filters as a dictionary. Use this option when the name of a column conflicts
-   with a named parameter of this method.
-- ``run_async``: If True, run the query in asynchronous mode. This mode is more robust and preferable for long-running queries.
-- ``return_adql``: If True, return the ADQL query string instead of executing the query. This is useful for debugging or for users who want
-   to run the query directly against the TAP service. When False, the ADQL query string is also returned in the metadata of the result table.
+- ``offset``: An integer specifying the number of results to skip before starting to return results.
+  This is useful for paginating through large result sets. Default is 0.
+- ``count_only``: A boolean indicating whether to return only the count of matching results instead of
+  the results themselves. Default is False.
+- ``select_cols``: A list of column names to include in the results. If not specified, all columns will
+  be returned.
+- ``sort_by``: A string or list of strings specifying the column(s) to sort the results by. Default is
+  None (no sorting).
+- ``sort_desc``: A boolean or list of booleans specifying whether to sort in descending order for each
+  column specified in ``sort_by``. Default is False (ascending order).
+- ``filters``: Another parameter used to specify criteria filters as a dictionary. Use this option when
+  the name of a column conflicts with a named parameter of this method.
+- ``run_async``: If True, run the query in asynchronous mode. This mode is more robust and preferable
+  for long-running queries.
+- ``return_adql``: If True, return the ADQL query string instead of executing the query. This is useful
+  for debugging or for users who want to run the query directly against the TAP service. When False, 
+  the ADQL query string is also returned in the metadata of the result table.
 
 These parameters allow users to control the scope and format of their queries consistently across all three methods.
 
@@ -264,14 +268,19 @@ We will also select a subset of columns to return with the ``select_cols`` param
 .. doctest-remote-data::
 
    >>> result = Catalogs.query_criteria(
-   ...     collection="ullyses",  # Query the 'ullyses' collection
+   ...     collection="ullyses",       # Query the 'ullyses' collection
    ...     catalog="sciencemetadata",  # Query the 'sciencemetadata' catalog
-   ...     target_name_ullyses="NGC*",  # Query for targets names starting with 'NGC'
-   ...     sp_class=["O", "B"],  # Query for targets with spectral class "O" or "B"
-   ...     known_binary=False,  # Query for targets that are not known binaries
-   ...     target_classification=["!Galaxy", "!Late O Dwarf"],  # Exclude targets classified as 'Galaxy' or 'Late O Dwarf'
-   ...     gaia_parallax=["<-0.1", ">=0"],  # Query for targets with Gaia parallax less than -0.01 or greater than or equal to 0
-   ...     star_teff="30000..50000",  # Query for targets with effective temperature between 30,000 and 50,000 K
+   ...     target_name_ullyses="NGC*", # Query for targets names starting with 'NGC'
+   ...     sp_class=["O", "B"],        # Query for targets with spectral class "O" or "B"
+   ...     known_binary=False,         # Query for targets that are not known binaries
+   ...     target_classification=[     # Exclude targets classified as 'Galaxy' or 'Late O Dwarf'
+   ...         "!Galaxy",
+   ...         "!Late O Dwarf",
+   ...     ],
+   ...     gaia_parallax=[             # Query for targets with Gaia parallax less than -0.01 or greater than or equal to 0
+   ...         "<-0.1", ">=0",
+   ...     ],
+   ...     star_teff="30000..50000",   # Query for targets with effective temperature between 30,000 and 50,000 K
    ...     select_cols=["target_name_ullyses", "target_classification", "known_binary", "sp_class", "gaia_parallax", "star_teff"]
    ... )
    >>> result[:5].pprint(max_width=-1)  #doctest: +IGNORE_OUTPUT
@@ -289,20 +298,21 @@ Spatial Query Parameters
 
 If a catalog supports spatial queries, the following parameters can be used to specify the spatial region of interest:
 
-- ``coordinates``: A string or `~astropy.coordinates.SkyCoord` object specifying the center of a cone search. This parameter is used in
-  conjunction with ``radius``.
-- ``object_name``: A string specifying the name of an astronomical object to resolve to coordinates for a cone search. This parameter is used in
-  conjunction with ``radius``.
-- ``resolver``: A string specifying the name of the resolver to use when resolving ``object_name`` to coordinates. This is only applicable when
-  ``object_name`` is provided. Default is None.
-- ``radius``: The radius of a cone search around ``coordinates`` or ``object_name``. Can be defined as a string with units (e.g., "10 arcsec"),
-  a `~astropy.units.Quantity`, or a float in degrees. Default is 0.2 degrees.
+- ``coordinates``: A string or `~astropy.coordinates.SkyCoord` object specifying the center of a cone search.
+  This parameter is used in conjunction with ``radius``.
+- ``object_name``: A string specifying the name of an astronomical object to resolve to coordinates for a
+  cone search. This parameter is used in conjunction with ``radius``.
+- ``resolver``: A string specifying the name of the resolver to use when resolving ``object_name`` to
+  coordinates. This is only applicable when ``object_name`` is provided. Default is None.
+- ``radius``: The radius of a cone search around ``coordinates`` or ``object_name``. Can be defined as a string
+  with units (e.g., "10 arcsec"), a `~astropy.units.Quantity`, or a float in degrees. Default is 0.2 degrees.
 - ``region``: Specifies the spatial region of interest for more complex spatial queries, such as polygon searches.
-   Please see the `Specifying Spatial Regions`_ section below for details on how to use this parameter.
+  Please see the `Specifying Spatial Regions`_ section below for details on how to use this parameter.
 
-If no spatial parameters are provided, the query is purely column-based and will not filter results based on position. If they are supplied, the
-spatial parameters are combined with any column-based criteria using a logical **AND**, meaning that only results that satisfy both the spatial and
-column-based criteria will be returned.
+If no spatial parameters are provided, the query is purely column-based and will not filter results based
+on position. If they are supplied, the spatial parameters are combined with any column-based criteria using
+a logical **AND**, meaning that only results that satisfy both the spatial and column-based criteria will
+be returned.
 
 We'll demonstrate a spatial query using the HSC summary source catalog, which supports spatial queries. Let's filter for the following:
 
@@ -318,12 +328,12 @@ the number of results returned to 10 and select a subset of columns to return wi
    >>> result = Catalogs.query_criteria(
    ...     collection="hsc",
    ...     coordinates="322.49324 12.16683",
-   ...     radius="2 arcsec",  # Query for sources within 2 arcseconds of the specified coordinates
-   ...     targetname=["M-15", "NGC*"],  # Query for targets with names 'M-15' or starting with 'NGC'
-   ...     starttime="2006..2013",  # Query for observations with starttime between 2006 and 2013
+   ...     radius="2 arcsec",                   # Query for sources within 2 arcseconds of the specified coordinates
+   ...     targetname=["M-15", "NGC*"],         # Query for targets with names 'M-15' or starting with 'NGC'
+   ...     starttime="2006..2013",              # Query for observations with starttime between 2006 and 2013
    ...     sort_by=["numimages", "starttime"],  # Sort results by number of images and then by starttime
-   ...     sort_desc=[False, True],  # Sort numimages in ascending order and starttime in descending order
-   ...     limit=5,  # Limit to 5 results
+   ...     sort_desc=[False, True],             # Sort numimages in ascending order and starttime in descending order
+   ...     limit=5,                               # Limit to 5 results
    ...     select_cols=["matchid", "matchra", "matchdec", "numimages", "starttime", "targetname"]
    ... )
    >>> result.pprint(max_width=-1)
@@ -336,14 +346,19 @@ the number of results returned to 10 and select a subset of columns to return wi
    105452327  322.4933282596331  12.16732046125442         3 2011-10-07 15:20:59.197000       M-15
     49726591  322.4927927121447 12.166998250407733         3 2006-05-02 01:13:43.920000    NGC7078
 
-The `~astroquery.mast.CatalogsClass.query_region` and `~astroquery.mast.CatalogsClass.query_object` methods are convenience methods for spatial queries.
-`~astroquery.mast.CatalogsClass.query_region` allows you to specify a region on the sky using the ``coordinates``, ``radius``, and/or ``region`` parameters.
-`~astroquery.mast.CatalogsClass.query_object` allows you to specify an ``object_name`` that will be resolved to coordinates and a ``radius`` for a cone search.
-Both methods also support column-based criteria, sorting, and limiting of results, just like `~astroquery.mast.CatalogsClass.query_criteria`.
+The `~astroquery.mast.CatalogsClass.query_region` and `~astroquery.mast.CatalogsClass.query_object` methods
+are convenience methods for spatial queries.
+`~astroquery.mast.CatalogsClass.query_region` allows you to specsify a region on the sky using the ``coordinates``,
+``radius``, and/or ``region`` parameters.
+`~astroquery.mast.CatalogsClass.query_object` allows you to specify an ``object_name`` that will be resolved to
+coordinates and a ``radius`` for a cone search.
+Just like `~astroquery.mast.CatalogsClass.query_criteria`, both methods also support column-based criteria,
+sorting, and limiting of results.
 
-For these queries, we will use the ``tic_v82`` collection, which refers to the
-`TESS Input Catalog version 8.2 <https://ui.adsabs.harvard.edu/abs/2022yCat.4039....0P/abstract>`_. We'll use the `~astroquery.mast.CatalogsClass.query_region`
-method to perform a simple cone search for sources within 1 arcminute of the coordinates (158.47924, -7.30962).
+For the following queries, we will use the ``tic_v82`` collection, which refers to the
+`TESS Input Catalog version 8.2 <https://ui.adsabs.harvard.edu/abs/2022yCat.4039....0P/abstract>`_.
+We'll use the `~astroquery.mast.CatalogsClass.query_region` method to perform a simple cone search
+for sources within 1 arcminute of the coordinates (158.47924, -7.30962).
 
 .. doctest-remote-data::
 
@@ -362,10 +377,11 @@ method to perform a simple cone search for sources within 1 arcminute of the coo
     56661355 158.467833401313 -7.31994230664877
    841736289 158.475246467012 -7.29984176473098
 
-For this next query, we'll use the `~astroquery.mast.CatalogsClass.query_object` method to search for sources within 0.1 degrees of the object
-`M11 <https://science.nasa.gov/mission/hubble/science/explore-the-night-sky/hubble-messier-catalog/messier-11/>`_, which is an open star cluster
-also known as the Wild Duck Cluster. We'll also filter for sources that are stars, sort results by the effective temperature of the source, and
-limit the number of results to 10.
+For this next query, we'll use the `~astroquery.mast.CatalogsClass.query_object` method to search for sources
+within 0.1 degrees of the object
+`M11 <https://science.nasa.gov/mission/hubble/science/explore-the-night-sky/hubble-messier-catalog/messier-11/>`_,
+which is an open star cluster also known as the Wild Duck Cluster. We'll also filter for sources that are stars,
+sort results by the effective temperature of the source, and limit the number of results to 10.
 
 .. doctest-remote-data::
 
@@ -398,24 +414,29 @@ limit the number of results to 10.
 Specifying Spatial Regions
 --------------------------
 
-For catalogs that support spatial queries, there are several ways to specify the spatial region of interest. The simplest is a cone search,
-defined by a center position and a radius. More complex regions, such as polygons, can also be specified using the ``region`` parameter.
+For catalogs that support spatial queries, there are several ways to specify the spatial region of interest.
+The simplest is a cone search, defined by a center position and a radius. More complex regions, such as
+polygons, can also be specified using the ``region`` parameter.
 
 Cone Search
 ^^^^^^^^^^^
 
-Cone searches are the most common type of spatial query, defined by a center position and a radius. They may be specified using:
+Cone searches are the most common type of spatial query, defined by a center position and a radius.
+They may be specified using:
 
 - The ``coordinates`` and ``radius`` parameters together.
 - The ``object_name`` and ``radius`` parameters together, where the object name is resolved to coordinates.
 - The ``region`` parameter as:
-  - A `~regions.CircleSkyRegion` object from the `~regions` package.
-  - A Space-Time Coordinate (STC) string in the format ``CIRCLE [frame] <ra> <dec> <radius>``, where ra, dec, and radius are in degrees.
+
+   - A `~regions.CircleSkyRegion` object from the `~regions` package.
+   - A Space-Time Coordinate (STC) string in the format ``CIRCLE [frame] <ra> <dec> <radius>``, where ra,
+     dec, and radius are in degrees.
 
 Let's demonstrate this on the ``skymapperdr4`` collection, which contains catalogs from the
-`SkyMapper Southern Survey: Data Release 4 <https://skymapper.anu.edu.au/data-release/>`_. The catalog we query will be "dr4.master", which is
-a master catalog of sources detected in the SkyMapper DR4 survey, containing their positions, magnitudes, and other properties. Our cone
-search will be centered on the coordinate (18.855, -6.945) with a radius of 0.01 degrees.
+`SkyMapper Southern Survey: Data Release 4 <https://skymapper.anu.edu.au/data-release/>`_. The catalog
+we query will be "dr4.master", which is a master catalog of sources detected in the SkyMapper DR4 survey,
+containing their positions, magnitudes, and other properties. Our cone search will be centered on the
+coordinate (18.855, -6.945) with a radius of 0.01 degrees.
 
 .. doctest-remote-data::
    >>> from regions import CircleSkyRegion
@@ -428,8 +449,10 @@ search will be centered on the coordinate (18.855, -6.945) with a radius of 0.01
    >>> result = Catalogs.query_region(
    ...     collection="skymapperdr4",
    ...     catalog="dr4.master",
-   ...     region=circle_sky_region,  # or use region=circle_stc_string
-   ...     select_cols=["object_id", "raj2000", "dej2000"]
+   ...     region=circle_sky_region,   # or use region=circle_stc_string
+   ...     select_cols=[
+   ...         "object_id", "raj2000", "dej2000",
+   ...     ]
    ... )
    >>> result.pprint(max_width=-1)
    object_id   raj2000   dej2000
@@ -452,11 +475,12 @@ They may be specified using any of the following as the ``region`` parameter:
 - A Space-Time Coordinate (STC) string in the format ``POLYGON [frame] <ra_1> <dec_1> <ra_2> <dec_2> ... <ra_n> <dec_n>``, where (ra_i, dec_i)
   are the vertices of the polygon in degrees.
 
-Keep in mind that at least three vertices are required to define a valid polygon, and the vertices should be ordered either clockwise or
-counterclockwise. The polygon will be automatically closed by connecting the last vertex back to the first.
+Keep in mind that at least three vertices are required to define a valid polygon, and the vertices should
+be ordered either clockwise or counterclockwise. The polygon will be automatically closed by connecting the
+last vertex back to the first.
 
-Let's search for sources in the Skymapper source catalog that fall within a four-sided polygon. The polygon has the same center as the
-previous cone search, so the results may look similar!
+Let's search for sources in the Skymapper source catalog that fall within a four-sided polygon. The polygon
+has the same center as the previous cone search, so the results may look similar!
 
 .. doctest-remote-data::
    >>> from regions import PolygonSkyRegion
@@ -471,7 +495,7 @@ previous cone search, so the results may look similar!
    >>> result = Catalogs.query_region(
    ...     collection="skymapperdr4",
    ...     catalog="dr4.master",
-   ...     region=polygon_sky_region,  # or use region=polygon_sky_region or region=polygon_stc_string
+   ...     region=polygon_sky_region,  # or use region=polygon_iter or region=polygon_stc_string
    ...     select_cols=["object_id", "raj2000", "dej2000"]
    ... )
    >>> result.pprint(max_width=-1)
