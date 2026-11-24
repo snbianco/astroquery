@@ -4,7 +4,8 @@ Image Cutouts
 *************
 
 The image cutout interfaces in `astroquery.mast` provide a convenient way to retrieve
-small, spatially localized subsets of large imaging datasets hosted at MAST. Instead of
+small, spatially localized subsets of large imaging datasets hosted by 
+`Mikulski Archive for Space Telescopes (MAST) <https://archive.stsci.edu/>`_.. Instead of
 downloading full-frame images, users can request cutouts centered on a sky position or target
 of interest, reducing data volume and simplifying exploratory analysis.
 
@@ -29,9 +30,9 @@ The `~astroquery.mast.TesscutClass` provides programmatic access to the
 `MAST TESScut API <https://mast.stsci.edu/tesscut/docs/getting_started.html#requesting-a-cutout>`__,
 enabling TESSCut queries directly from Python scripts and applications. It has three main capabilities:
 
-- Sector Discovery: Identify which TESS sectors, cameras, and CCDs cover a given sky position or object.
-- In-memory Cutouts: Retrieve cutouts as `~astropy.io.fits.HDUList` objects for immediate analysis without writing files to disk.
-- Downloaded Cutouts: Download cutout target pixel files (TPFs) to local storage.
+- **Sector Discovery:** Identify which TESS sectors, cameras, and CCDs cover a given sky position or object.
+- **In-memory Cutouts:** Retrieve cutouts as `~astropy.io.fits.HDUList` objects for immediate analysis without writing files to disk.
+- **Downloaded Cutouts:** Download cutout target pixel files (TPFs) to local storage.
 
 TESSCut supports cutout requests centered on fixed sky coordinates, resolved object names (including TIC IDs), and
 moving targets such as asteroids and comets. Requests may return multiple cutouts when a target appears in more than
@@ -66,21 +67,22 @@ The `~astroquery.mast.TesscutClass.get_sectors` method identifies the TESS secto
 footprints intersect a given target or region of the sky. Targets may be specified using sky
 coordinates, a resolved object name (including TIC IDs), or a moving target name.
 
-The result is returned as an `~astropy.table.Table` containing the sector number along with
+The result is returned as a `~astropy.table.Table` containing the sector number along with
 the corresponding camera and CCD information. This table can be used to:
 
-- Verify whether a target was observed by TESS
-- Identify all available sectors before requesting cutouts
-- Select a specific sector, camera, or CCD for downstream analysis
+- Verify whether a target was observed by TESS.
+- Identify all available sectors before requesting cutouts.
+- Select a specific sector, camera, or CCD for downstream analysis.
 
-If no sectors overlap the requested location, a warning is issued and an empty result is
+If no sectors overlap the requested location, a warning is issued, and an empty result is
 returned.
 
 For moving targets, sector discovery accounts for the target's motion across the sky. When a
 sector is not explicitly specified in later cutout requests, this information is used
 internally to generate cutouts for each applicable sector.
 
-The following example demonstrates how to use the `~astroquery.mast.TesscutClass.get_sectors` method with sky coordinates.
+The following example demonstrates how to use the `~astroquery.mast.TesscutClass.get_sectors`
+method with sky coordinates.
 
 .. doctest-remote-data::
 
@@ -185,7 +187,9 @@ target pixel files to local storage.
 
 This method accepts the same target specifications and cutout sizing options as
 `~astroquery.mast.TesscutClass.get_cutouts`, but instead of returning in-memory FITS objects, it writes the resulting
-cutout files to disk and returns an `~astropy.table.Table` listing the local file paths.
+cutout files to disk and returns a `~astropy.table.Table` listing the local file paths.
+The cutouts are downloaded into the current working directory unless the user specifies the
+``path`` parameter.
 
 By default, cutouts are downloaded as a compressed archive and automatically extracted into
 the specified directory. The temporary archive is removed after extraction. To retain the
@@ -343,8 +347,9 @@ image cutouts to disk.
 
 This method accepts the same target, size, and survey parameters as `~astroquery.mast.ZcutClass.get_cutouts`, but
 writes the resulting cutout files to the specified directory instead of returning in-memory
-objects. The method returns an `~astropy.table.Table` containing the local file paths of the
-downloaded cutouts.
+objects. The method returns a `~astropy.table.Table` containing the local file paths of the
+downloaded cutouts. The cutouts are downloaded into the current working directory unless the
+user specifies the ``path`` parameter.
 
 By default, cutouts are returned from the service as a compressed archive and are
 automatically extracted into the output directory. The temporary archive is removed after
@@ -467,8 +472,9 @@ image cutouts to disk.
 
 This method accepts the same target and size parameters as `~astroquery.mast.HapcutClass.get_cutouts`,
 but writes the resulting cutout files to the specified directory instead of returning in-memory FITS
-objects. The method returns an `~astropy.table.Table` listing the local paths of the
-downloaded cutouts.
+objects. The method returns a `~astropy.table.Table` listing the local paths of the
+downloaded cutouts. The cutouts are downloaded into the current working directory unless the
+user specifies the ``path`` parameter.
 
 By default, cutouts are returned from the service as a compressed archive and are
 automatically extracted into the output directory. The temporary archive is removed after

@@ -66,11 +66,13 @@ metadata fields, refer to the `JWST Field Documentation <https://mast.stsci.edu/
 
    >>> from astroquery.mast import Mast
    ...
-   >>> observations = Mast.mast_query('Mast.Jwst.Filtered.Nirspec',
-   ...                                targoopp='T',
-   ...                                productLevel=['2a', '2b'],
-   ...                                duration={'min': 810, 'max': 820},
-   ...                                columns=['filename', 'targoopp', 'productLevel', 'duration'])
+   >>> observations = Mast.mast_query(
+   ...    'Mast.Jwst.Filtered.Nirspec',
+   ...    targoopp='T',
+   ...    productLevel=['2a', '2b'],
+   ...    duration={'min': 810, 'max': 820},
+   ...    columns=['filename', 'targoopp', 'productLevel', 'duration']
+   ... )
    >>> print(observations) # doctest: +IGNORE_OUTPUT
                      filename                   targoopp productLevel duration
    -------------------------------------------- -------- ------------ --------
@@ -174,16 +176,16 @@ additional metadata filters.
 
 Cone searches are defined by three required parameters:
 
-- ``ra``: Right ascension of the search center, in decimal degrees
-- ``dec``: Declination of the search center, in decimal degrees
-- ``radius``: Search radius, in decimal degrees
+- ``ra``: Right ascension of the search center, in decimal degrees.
+- ``dec``: Declination of the search center, in decimal degrees.
+- ``radius``: Search radius, in decimal degrees.
 
 Cone search services return a table of matching observations and **always include all
 available columns** in the response. Unlike filtered services, cone searches **do not support
 column selection or column-based filtering** through keyword arguments. Attempting to use
 these parameters with a cone search service will either result in an error or warning.
 
-Because cone searches operate purely on spatial constraints, they are often used as a
+Since cone searches operate purely on spatial constraints, they are often used as a
 starting point for exploratory searches or for identifying nearby data products before
 applying more restrictive filters through other MAST services.
 
@@ -230,7 +232,7 @@ Some MAST services, such as
 `Mast.Name.Lookup <https://mast.stsci.edu/api/v0/_services.html#MastNameLookup>`__, return
 response formats that are not compatible with `~astroquery.mast.MastClass.mast_query`.
 The method expects results in a standard JSON format so that they can
-be automatically parsed into an `~astropy.table.Table`. When a service returns a different
+be automatically parsed into a `~astropy.table.Table`. When a service returns a different
 response type by default, this automatic conversion is not possible.
 
 For these services, users should instead call
