@@ -429,50 +429,6 @@ class MastMissionsClass(MastQueryWithLogin):
             products = self._extract_products(response)
             return Table(products)
 
-    def _validate_criteria(self, **criteria):
-        """
-        Check that criteria keyword arguments are valid column names for the mission.
-        Raises InvalidQueryError if a criteria argument is invalid.
-
-        Parameters
-        ----------
-        **criteria
-            Keyword arguments representing criteria filters to apply.
-
-        Raises
-        -------
-        InvalidQueryError
-            If a keyword does not match any valid column names, an error is raised that suggests the closest
-            matching column name, if available.
-        """
-        if self.service == self._search:
-            results = self._service_api_connection._parse_result(response, verbose, data_key='results')
-
-            # If returning a count_only response, return the count as an integer
-            if isinstance(results, int):
-                return results
-
-            # Add column descriptions to column metadata
-            column_list = self.get_column_list(self._mission_to_search)
-            for col in results.columns:
-                if col in column_list['name']:
-                    description = column_list[column_list['name'] == col]['description'].value[0]
-                    results[col].meta = {'description': str(description)}
-
-            # Add search parameters to table metadata
-            result_json = response.json()
-            results.meta['search_params'] = result_json.get('search_params', {})
-
-            # Warn if maximum results are returned
-            if len(results) >= self.limit:
-                warnings.warn("Maximum results returned, may not include all sources within radius.",
-                              MaxResultsWarning)
-            return results
-
-        elif self.service == self._list_products:
-            products = self._extract_products(response)
-            return Table(products)
-
     @class_or_instance
     @deprecated_renamed_argument('objectname', 'object_names', since='0.4.12')
     def query_criteria_async(self, *, coordinates=None, object_names=None, radius=3*u.arcmin,
