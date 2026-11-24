@@ -72,11 +72,11 @@ metadata archived at MAST. Queries may be based on **sky position, object name, 
 arbitrary metadata criteria**, and all methods return results in a consistent tabular
 format that can be further refined or used to retrieve data products.
 
-All query methods return results as an `~astropy.table.Table`, where each row corresponds to a
+All query methods return results as a `~astropy.table.Table`, where each row corresponds to a
 single observation. The table includes metadata such as mission name, instrument, target name,
-observation time, and identifiers needed to retrieve associated data products. The exact set of returned columns is defined by the
-Common Archive Observation Model (CAOM). Users can inspect available columns and their meanings using
-``Observations.get_metadata("observations")`` or by visiting the
+observation time, and identifiers needed to retrieve associated data products. The exact set of returned columns
+is defined by the Common Archive Observation Model (CAOM). Users can inspect available columns and their meanings
+by using ``Observations.get_metadata("observations")`` or by visiting the
 `MAST CAOM Fields Descriptions <https://mast.stsci.edu/api/v0/_c_a_o_mfields.html>`__.
 
 Positional Queries
@@ -86,7 +86,8 @@ Positional queries search for observations whose footprints intersect a circular
 the sky. The search region is defined by a central position and a radius.
 
 The ``radius`` parameter may be provided as:
-- An `~astropy.units.Quantity` with angular units (recommended)
+
+- A `~astropy.units.Quantity` with angular units (recommended)
 - A string parsable by `~astropy.coordinates.Angle` (e.g., "0.1 deg", "5 arcmin", "120 arcsec")
 - A numeric value, which is interpreted as degrees
 
@@ -97,7 +98,7 @@ results.
 
 To search using explicit sky coordinates, use the
 `~astroquery.mast.ObservationsClass.query_region` method. The ``coordinates`` parameter may be
-provided as a string (e.g., "322.49324 12.16683") or as an
+provided as a string (e.g., "322.49324 12.16683") or as a
 `~astropy.coordinates` object (e.g., `~astropy.coordinates.SkyCoord`).
 
 .. doctest-remote-data::
@@ -114,7 +115,11 @@ provided as a string (e.g., "322.49324 12.16683") or as an
       science           TESS            SPOC ...    nan 232652269      0.0
       science           TESS            SPOC ...    nan 232652273      0.0
 
-To search using a resolvable object name, use the `~astroquery.mast.ObservationsClass.query_object` method,
+
+Object Queries
+--------------
+
+To search with a resolvable object name, use the `~astroquery.mast.ObservationsClass.query_object` method,
 which resolves the name to sky coordinates and performs a positional search centered on the resolved location.
 
 .. doctest-remote-data::
@@ -133,22 +138,23 @@ which resolves the name to sky coordinates and performs a positional search cent
 Criteria-Based Queries
 ----------------------
 
-In addition to positional searches, observations may be queried using metadata
-criteria such as mission name, instrument, filters, proposal information, or observation
-time. These queries are performed using the `~astroquery.mast.ObservationsClass.query_criteria` method.
+Observations may also be queried using metadata criteria such as mission name, instrument,
+instrument, filters, proposal information, or observation time. These queries are 
+performed using the `~astroquery.mast.ObservationsClass.query_criteria` method.
 
 Criteria are specified as keyword arguments corresponding to column names in the observation
 metadata table, as returned by ``Observations.get_metadata("observations")``.
 At least one **non-positional** criterion must be supplied.
 
 For criteria with discrete values (e.g., mission name, instrument), values may be provided as:
-  - A single string or number
-  - A list of strings or numbers (interpreted with OR logic)
+
+- A single string or number
+- A list of strings or numbers (interpreted with OR logic)
 
 Discrete values also accept wildcard characters (``*`` or ``%``) for pattern matching. Wildcards are special characters
 used in search patterns to represent one or more unknown characters, allowing for flexible matching of strings.
-Each wildcard character replaces any number of characters preceding, following, or in between existing characters, depending on its placement.
-However, only one wildcarded value can be processed per criterion.
+Each wildcard character replaces any number of characters preceding, following, or in between existing characters,
+depending on its placement. However, only one wildcarded value can be processed per criterion.
 
 For criteria with continuous values (e.g., observation time, exposure time), values should be in the form
 ``[minVal, maxVal]`` to specify a range. Datetime values must be provided in Modified Julian Date (MJD) format.
@@ -159,10 +165,12 @@ The following example demonstrates a crtieria-based query with list matching, a 
 
    >>> from astroquery.mast import Observations
    ...
-   >>> obs_table = Observations.query_criteria(dataproduct_type="image",  # Exact match on data product type
-   ...                                         proposal_id=[11897, 12715],  # Match either proposal ID
-   ...                                         proposal_pi="Osten*",  # Wildcard match on PI name
-   ...                                         em_min=[100, 200])  # Range match on minimum wavelength
+   >>> obs_table = Observations.query_criteria(
+   ...     dataproduct_type="image",     # Exact match on data product type
+   ...     proposal_id=[11897, 12715],   # Match either proposal ID
+   ...     proposal_pi="Osten*",         # Wildcard match on PI name
+   ...     em_min=[100, 200]             # Range match on minimum wavelength
+   ... )
    >>> print(obs_table[:5])  # doctest: +IGNORE_OUTPUT
    intentType obs_collection provenance_name ... srcDen  obsid     objID
    ---------- -------------- --------------- ... ------ -------- ---------
@@ -172,9 +180,9 @@ The following example demonstrates a crtieria-based query with list matching, a 
       science            HST          CALCOS ...    nan 24139597 144540280
       science            HST          CALCOS ...    nan 24139575 144540281
 
-We encourage the use of wildcards particularly when querying for JWST observations
-with the ``instrument_name`` criteria. This is because of the varying instrument names
-for JWST science instruments, which you can read more about on the MAST page for
+We particularly encourage using wildcards when querying JWST observations
+with ``instrument_name`` criteria since JWST has varying names for its science instruments.
+You can read more about the JWST instrument names on the MAST page for
 `JWST Instrument Names <https://outerspace.stsci.edu/display/MASTDOCS/JWST+Instrument+Names>`__.
 
 .. doctest-remote-data::
@@ -247,21 +255,22 @@ may be associated with one or more data products, such as images, spectra, time-
 Getting Product Lists
 ---------------------
 
-Given one or more observations (or their corresponding MAST Product Group IDs, ``"obsid"``), the
+Given one or more observations (or their corresponding MAST Product Group IDs, ``"obsid"``s), the
 `~astroquery.mast.ObservationsClass.get_product_list` method returns a table of associated data products.
 
-The returned results are in the form of an `~astropy.table.Table`, where each row corresponds to a single data product.
+The returned results are in the form of a `~astropy.table.Table`, where each row corresponds to a single data product.
 Available product metadata fields can be accessed using ``Observations.get_metadata("products")`` or by visiting the
 `MAST Products Fields Descriptions <https://mast.stsci.edu/api/v0/_productsfields.html>`__.
 
 The input to `~astroquery.mast.ObservationsClass.get_product_list` may be:
-  - A table or row returned from an observation query method
-  - A single ``obsid`` value
-  - A list of ``obsid`` values
+
+- A table or row returned from an observation query method
+- A single ``obsid`` value
+- A list of ``obsid`` values
 
 Note that the input to `~astroquery.mast.ObservationsClass.get_product_list` **must** be the MAST Product Group ID,
-(``"obsid"``), and **not** the mission-specific observation identifier (``"obs_id"``). These identifiers are not interchangeable.
-Attempting to use ``"obs_id"`` values will result in an error.
+(``"obsid"``), and **not** the mission-specific observation identifier (``"obs_id"``). These identifiers are
+**not interchangeable**. Attempting to use ``"obs_id"`` values will result in an error.
 
 `~astroquery.mast.ObservationsClass.get_product_list` also includes an optional ``batch_size`` parameter,
 which controls how many observations are sent to the MAST service per request. This can be useful for managing
@@ -272,8 +281,14 @@ If not provided, batch_size defaults to 500.
 
    >>> from astroquery.mast import Observations
    ...
-   >>> obs_table = Observations.query_criteria(object_name="M8", obs_collection=["K2", "IUE"])
-   >>> data_products_by_obs = Observations.get_product_list(obs_table[0:2], batch_size=500)
+   >>> obs_table = Observations.query_criteria(
+   ...     object_name="M8", 
+   ...     obs_collection=["K2", "IUE"]
+   ... )
+   >>> data_products_by_obs = Observations.get_product_list(
+   ...   obs_table[0:2],
+   ...   batch_size=500
+   ... )
    >>> print(data_products_by_obs)  # doctest: +IGNORE_OUTPUT
    obsID  obs_collection dataproduct_type ... dataRights calib_level filters
    ------ -------------- ---------------- ... ---------- ----------- -------
@@ -283,12 +298,13 @@ If not provided, batch_size defaults to 500.
 Getting Unique Products
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-In many cases, multiple observations may reference the same underlying data product. To return a de-duplicated list
-of products, use `~astroquery.mast.ObservationsClass.get_unique_product_list`.
+In many cases, multiple observations may reference the same underlying data product. To return a de-duplicated
+list of products, use `~astroquery.mast.ObservationsClass.get_unique_product_list`.
 
-This method behaves similarly to `~astroquery.mast.ObservationsClass.get_product_list`, but filters out duplicate products based on their
-``"dataURI"`` values. This is particularly useful when querying large sets of observations that may share common data products. If
-duplicate products are found, an informational message is logged indicating how many unique products are being returned.
+This method behaves similarly to `~astroquery.mast.ObservationsClass.get_product_list`, but it filters out
+duplicate products based on their ``"dataURI"`` values. This is particularly useful when querying large sets
+of observations that may share common data products. If duplicate products are found, an informational message
+is logged indicating how many unique products are being returned.
 
 .. doctest-remote-data::
    >>> obs = Observations.query_criteria(obs_collection='HST',
@@ -320,28 +336,32 @@ Often, not all associated products are of interest for a given analysis. The
 `~astroquery.mast.ObservationsClass.filter_products` method allows users to filter product tables.
 
 Products may be filtered by:
-  - Minimum Recommended Products (``mrp_only=True``)
-  - File extension (e.g., ``extension="fits"``)
-  - Any other product metadata field (e.g., ``productType="SCIENCE"``)
+
+- Minimum Recommended Products (``mrp_only=True``)
+- File extension (e.g., ``extension="fits"``)
+- Any other product metadata field (e.g., ``productType="SCIENCE"``)
 
 Filters are combined using **AND** logic between different fields and **OR** logic within a single field,
 except when negated values are present.
 
-A filter value can be negated by prefiing it with ``!``, meaning that rows matching that value will be excluded from the results.
-When any negated value is present in a filter set, any positive values in that set are combined with **OR** logic, and the negated
-values are combined with **AND** logic against the positives.
+A filter value can be negated by prefixing it with ``!``, meaning that rows matching that value will be
+excluded from the results. When any negated value is present in a filter set, any positive values in that
+set are combined with **OR** logic, and the negated values are combined with **AND** logic against the positives.
 
 For example:
-  - ``productType=['A', 'B', '!C']`` → (productType != C) AND (productType == A OR productType == B)
-  - ``size=['!14400', '<20000']`` → (size != 14400) AND (size < 20000)
+
+- ``productType=['A', 'B', '!C']`` → (productType != C) AND (productType == A OR productType == B)
+- ``size=['!14400', '<20000']`` → (size != 14400) AND (size < 20000)
 
 For columns with numeric data types (``int`` or ``float``), filter values may be expressed as:
-  - A single number: ``size=100``
-  - A range in the form "start..end": ``size="100..1000"``
-  - A comparison operator followed by a number: ``size=">=1000"``
-  - A list of expressions: ``size=[100, "500..1000", ">=1500"]``
 
-The filter below returns FITS products that have a calibration level of 2 or lower **and** are of type "SCIENCE" **or** "PREVIEW".
+- A single number: ``size=100``
+- A range in the form "start..end": ``size="100..1000"``
+- A comparison operator followed by a number: ``size=">=1000"``
+- A list of expressions: ``size=[100, "500..1000", ">=1500"]``
+
+The filter below returns FITS products that have a calibration level of 2 or lower **and** are of type
+"SCIENCE" **or** "PREVIEW".
 
 .. doctest-remote-data::
 
@@ -377,22 +397,25 @@ Downloading Data Products
 -------------------------
 
 The primary method for downloading multiple files is `~astroquery.mast.ObservationsClass.download_products`.
-This method accepts a table of data products such as those returned by
-`~astroquery.mast.ObservationsClass.get_product_list` or `~astroquery.mast.ObservationsClass.get_unique_product_list`
+This method accepts a table of data products, such as those returned by
+`~astroquery.mast.ObservationsClass.get_product_list` or `~astroquery.mast.ObservationsClass.get_unique_product_list`,
 and downloads the corresponding files.
 
 By default, files are downloaded into a directory called ``mastDownload`` within the current working directory.
-Within this directory, files are organized by mission and observation ID. The download location can be customized
-using the ``download_dir`` keyword argument.
+Within this download directory, files are organized by mission and observation ID. The download location can be
+customized using the ``download_dir`` keyword argument.
 
 For convience, `~astroquery.mast.ObservationsClass.download_products` supports the same filtering options as
-`~astroquery.mast.ObservationsClass.filter_products`. This allows users to select only a subset of files to download.
+`~astroquery.mast.ObservationsClass.filter_products`, which allows users to select only a subset of files to download.
 
 .. doctest-skip::
 
    >>> from astroquery.mast import Observations
    ...
-   >>> single_obs = Observations.query_criteria(obs_collection="IUE", obs_id="lwp13058")
+   >>> single_obs = Observations.query_criteria(
+   ...     obs_collection="IUE",
+   ...     obs_id="lwp13058"
+   ... )
    >>> data_products = Observations.get_product_list(single_obs)
    ...
    >>> manifest = Observations.download_products(data_products, productType="SCIENCE")
@@ -405,11 +428,11 @@ For convience, `~astroquery.mast.ObservationsClass.download_products` supports t
        ./mastDownload/IUE/lwp13058/lwp13058.mxlo.gz COMPLETE    None None
    ./mastDownload/IUE/lwp13058/lwp13058mxlo_vo.fits COMPLETE    None None
 
-The return value is an `~astropy.table.Table` manifest listing the local file paths, download status,
+The return value is a `~astropy.table.Table` manifest listing the local file paths, download status,
 and any error messages for each requested product. This manifest can be used to verify successful downloads
 or to programmatically access the downloaded files.
 
-The ``curl_flag`` parameter may be used to generate a shell script containing ``curl`` commands that can be
+Setting the ``curl_flag`` parameter to **True** generates a shell script containing ``curl`` commands that can be
 executed at a later time to download the files. This is useful for batch downloads, scheduling downloads, or
 archiving download instructions. No files are downloaded when this flag is set; only the script is created.
 
@@ -424,8 +447,8 @@ archiving download instructions. No files are downloaded when this flag is set; 
 Downloading a Single File
 -------------------------
 
-To download an individual data product, use the `~astroquery.mast.ObservationsClass.download_file` method and provide
-a MAST data URI.
+To download an individual data product, use the `~astroquery.mast.ObservationsClass.download_file` method,
+and provide a MAST data URI.
 
 By default, the file is saved to the current working directory. A specific directory or
 filename may be provided using the ``local_path`` argument.
@@ -437,7 +460,10 @@ source URL.
 
    >>> from astroquery.mast import Observations
    ...
-   >>> single_obs = Observations.query_criteria(obs_collection="IUE", obs_id="lwp13058")
+   >>> single_obs = Observations.query_criteria(
+   ...     obs_collection="IUE",
+   ...     obs_id="lwp13058"
+   ... )
    >>> data_products = Observations.get_product_list(single_obs)
    ...
    >>> product = data_products[0]["dataURI"]
@@ -450,11 +476,11 @@ source URL.
    ('COMPLETE', None, None)
 
 The `~astroquery.mast.ObservationsClass.download_file` and `~astroquery.mast.ObservationsClass.download_products`
-methods serve different purposes and are not interchangeable:
+methods serve different purposes and are **not** interchangeable:
 
-   - Use `~astroquery.mast.ObservationsClass.download_file` to download a **single file** by providing its MAST data URI.
-   - Use `~astroquery.mast.ObservationsClass.download_products` to download **multiple files** by providing a table of data products or
-     a list of observation identifiers.
+- Use `~astroquery.mast.ObservationsClass.download_file` to download a **single file** by providing its MAST data URI.
+- Use `~astroquery.mast.ObservationsClass.download_products` to download **multiple files** by providing a table of
+   data products or a list of observation identifiers.
 
 Using the incorrect method for a given input type will result in an error.
 
@@ -475,22 +501,24 @@ Why Use Cloud Data Access?
 Cloud-hosted MAST data are stored in public object storage (Amazon S3) alongside cloud computing resources.
 Using cloud access allows users to:
 
-  - **Avoid large downloads** by reading data directly from cloud storage.
-  - **Reduce local storage needs** by processing data in the cloud without downloading files.
-  - **Improve performance** by leveraging high-bandwidth connections between cloud compute and storage.
-  - **Scale analyses** by utilizing cloud compute resources that can be adjusted to meet workload demands.
-  - **Enable reproducible workflows** that operate in a consistent cloud environment.
+- **Avoid large downloads** by reading data directly from cloud storage.
+- **Reduce local storage needs** by processing data in the cloud without downloading files.
+- **Improve performance** by leveraging high-bandwidth connections between cloud compute and storage.
+- **Scale analyses** by utilizing cloud compute resources that can be adjusted to meet workload demands.
+- **Enable reproducible workflows** that operate in a consistent cloud environment.
 
 Cloud access is particularly well-suited for:
-  - Large surveys or multi-terabyte datasets.
-  - Batch processing or pipeline workflows.
-  - JupyterHub or notebook environments hosted in the cloud.
-  - Situations where only a subset of files will be accessed.
+
+- Large surveys or multi-terabyte datasets.
+- Batch processing or pipeline workflows.
+- JupyterHub or notebook environments hosted in the cloud.
+- Situations where only a subset of files will be accessed.
 
 Traditional downloads remain appropriate when:
-  - Working with small datasets that fit comfortably on local storage.
-  - Working offline or in environments without internet access.
-  - Using software that requires local file access.
+
+- Working with small datasets that fit comfortably on local storage.
+- Working offline or in environments without internet access.
+- Using software that requires local file access.
 
 Enabling Cloud Data Access
 --------------------------
@@ -499,7 +527,8 @@ Public datasets from several missions including Hubble, Kepler, TESS, GALEX, and
 on AWS in `STScI's Open Data Bucket <https://registry.opendata.aws/collab/stsci/>`_.
 
 Enable cloud access using the `~astroquery.mast.ObservationsClass.enable_cloud_dataset` method. Once enabled,
-cloud storage becomes the **preferred source** for data access when available.
+cloud storage becomes the **preferred source** for data access when available. Note that the default provider
+is "AWS".
 
 .. doctest-remote-data::
 
@@ -509,7 +538,7 @@ cloud storage becomes the **preferred source** for data access when available.
    INFO: Using the S3 STScI public dataset [astroquery.mast.cloud]
 
 To get a list of cloud-hosted MAST datasets, use the `~astroquery.mast.ObservationsClass.list_cloud_datasets` method. You
-should see both mission names (e.g., "hst", "kepler") and High-Level Science Product (`HLSP <https://mast.stsci.edu/hlsp>`__)
+will see both mission names (e.g., "hst", "kepler") and High-Level Science Product (`HLSP <https://mast.stsci.edu/hlsp>`__)
 collections (e.g., "mast/hlsp/jades").
 
 .. doctest-remote-data::
@@ -530,15 +559,15 @@ Accessing Data via Cloud URIs
 Instead of downloading files, you can retrieve a list of cloud URIs (e.g., S3 URIs) that correspond to a set of
 data products using `~astroquery.mast.ObservationsClass.get_cloud_uris`. This method accepts either:
 
-  - A table of data products (as returned by `~astroquery.mast.ObservationsClass.get_product_list`)
-  - Observation query criteria (as keyword arguments) and optional product filters (through the ``mrp_only``,
-    ``extension``, and ``filter_products`` parameters)
+- A table of data products (as returned by `~astroquery.mast.ObservationsClass.get_product_list`)
+- Observation query criteria (as keyword arguments) and optional product filters (through the ``mrp_only``,
+   ``extension``, and ``filter_products`` parameters)
 
 Cloud URIs may be returned as:
 
-  - Native cloud URIs (e.g., ``s3://stpubdata...``)
-  - HTTP URLs suitable for streaming (set ``full_url=True`` and ``include_bucket=False``)
-  - A mapping between MAST data URIs and cloud URIs (set ``return_uri_map=True``)
+- Native cloud URIs (e.g., ``s3://stpubdata...``)
+- HTTP URLs suitable for streaming (set ``full_url=True`` and ``include_bucket=False``)
+- A mapping between MAST data URIs and cloud URIs (set ``return_uri_map=True``)
 
 The following example demonstrates the extended workflow of querying observations, retrieving associated data products,
 filtering for relevant products, and obtaining their S3 URIs.
@@ -565,13 +594,14 @@ filtering for relevant products, and obtaining their S3 URIs.
    ['s3://stpubdata/hst/public/jbev/jbeveo010/jbeveo010_drz.fits', 's3://stpubdata/hst/public/jbev/jbevet010/jbevet010_drz.fits']
 
 This workflow can be streamlined by providing the query criteria directly to `~astroquery.mast.ObservationsClass.get_cloud_uris`.
-This approach is recommended for code brevity and when you do not need to inspect intermediate results. Query criteria are supplied
-as keyword arguments, and filters are supplied through the ``filter_products`` parameter. If both ``data_products`` and query
-criteria are provided, ``data_products`` takes precedence.
+This approach is recommended for code brevity and when you do not need to inspect intermediate results.
+Query criteria are supplied as keyword arguments, and filters are supplied through the ``filter_products``
+parameter. If both ``data_products`` and query criteria are provided, ``data_products`` takes precedence.
 
-Once the URIs are obtained, they can be used directly in cloud-based workflows or with cloud-enabled libraries such as
-`Astropy <https://docs.astropy.org/en/stable/io/fits/usage/cloud.html>`__. To read a FITS file directly from S3 using Astropy,
-use the `~astropy.io.fits.open` function with the S3 URI and appropriate ``fsspec`` keyword arguments.
+Once the URIs are obtained, they can be used directly in cloud-based workflows or with cloud-enabled libraries
+such as `Astropy <https://docs.astropy.org/en/stable/io/fits/usage/cloud.html>`__. To read a FITS file directly
+from S3 using Astropy, use the `~astropy.io.fits.open` function with the S3 URI and appropriate ``fsspec``
+keyword arguments.
 
 .. doctest-remote-data::
 .. doctest-requires:: fsspec,s3fs
@@ -593,11 +623,11 @@ use the `~astropy.io.fits.open` function with the S3 URI and appropriate ``fsspe
 Hybrid Workflows: Cloud-First Downloads
 ---------------------------------------
 
-When cloud access is enabled, the standard download methods will **preferentially pull files from cloud storage** when available
-and fall back to MAST servers as needed.
+When cloud access is enabled, the standard download methods will **preferentially pull files from cloud storage** 
+when available and fall back to MAST servers as needed.
 
-To skip non-cloud products entirely, set the ``cloud_only`` parameter to `True`. This option is useful for workflows that must
-remain fully cloud-based.
+To skip non-cloud products entirely, set the ``cloud_only`` parameter to `True`. This option is useful for
+workflows that must remain fully cloud-based.
 
 .. doctest-skip::
 

@@ -9,7 +9,7 @@ The `~astroquery.mast.MastMissionsClass` is a versatile tool for accessing and w
 users to search for mission-specific metadata and retrieve associated data products. This data is also findable through the `MAST
 Search UI <https://mast.stsci.edu/search/ui/#/>`_.
 
-The following missions/products are currently available for search as of June 2026:
+The following missions/products are currently available for search as of November 2026:
 
 - `Hubble Space Telescope <https://www.stsci.edu/hst>`_ (``'hst'``)
 
@@ -21,7 +21,7 @@ The following missions/products are currently available for search as of June 20
 
 - `International Ultraviolet Explorer <https://archive.stsci.edu/iue/>`_ (``'iue'``)
 
-- `High Level Science Products <https://outerspace.stsci.edu/display/MASTDOCS/About+HLSPs>`_
+- `High Level Science Products <https://outerspace.stsci.edu/display/MASTDOCS/About+HLSPs>`_:
 
   - `COS Legacy Archive Spectroscopic SurveY <https://archive.stsci.edu/hlsp/classy>`_ (``'classy'``)
 
@@ -35,8 +35,8 @@ The basic workflow for using the `~astroquery.mast.MastMissionsClass` is as foll
 2. **Retrieve** a list of associated data products for the datasets.
 3. **Access** the data products by reading them into memory or downloading them to your local machine.
 
-The workflow looks very similar to the `~astroquery.mast.ObservationsClass` workflow, but there are a few key differences to note,
-and you should use the class that is best suited to your unique goals:
+The workflow is very similar to the `~astroquery.mast.ObservationsClass` workflow, though there are a few key
+differences to note:
 
 - **API**: ``MastMissions`` uses the `MAST Search API <https://mast.stsci.edu/search/docs/>`_ while ``Observations`` uses
   the `MAST Portal API <https://mast.stsci.edu/api/v0/>`_.
@@ -47,22 +47,25 @@ and you should use the class that is best suited to your unique goals:
   ``Observations`` is limited to the `fields described by the CAOM <https://mast.stsci.edu/api/v0/_c_a_o_mfields.html>`_ and has
   no criteria with mission-specific meaning.
 
-In summary, ``MastMissions`` is well-suited for fast, mission-specific queries that might require a more extensive selection
-of filter keywords. ``Observations`` is better for more broad, multi-mission searches.
+In summary, ``MastMissions`` is well-suited for fast, mission-specific queries that might require a more extensive 
+selection of filter keywords. ``Observations`` is better for more broad, multi-mission searches. You should use the
+class that is best suited to your unique goals.
 
 The Mission Attribute
 =======================
 
-The `~astroquery.mast.MastMissionsClass` is designed to query a single mission at a time. The ``MastMissions`` stores a ``mission`` attribute.
-If no mission is specified in a query, the ``mission`` attribute is used as the default. The ``mission`` attribute is a case-insensitive string
-that corresponds to the mission name. The available missions can be retrieved with the `~astroquery.mast.MastMissionsClass.get_available_missions` method
-or the `~astroquery.mast.MastMissionsClass.available_missions` property, which caches the list of missions after the first retrieval.
+The `~astroquery.mast.MastMissionsClass` is designed to query a single mission at a time. ``MastMissions``
+stores a ``mission`` attribute. If no mission is specified in a query, the ``mission`` attribute is used
+as the default. The ``mission`` attribute is a case-insensitive string that corresponds to the mission name.
+The available missions can be retrieved with the `~astroquery.mast.MastMissionsClass.get_available_missions`
+method or the `~astroquery.mast.MastMissionsClass.available_missions` property, which caches the list of 
+missions after the first retrieval.
 
 .. doctest-remote-data::
 
    >>> from astroquery.mast import MastMissions
    >>> MastMissions.get_available_missions()  # doctest: +IGNORE_OUTPUT
-   ['hst', 'jwst', 'classy', 'ullyses', 'iue']
+   ['hst', 'jwst', 'roman', 'classy', 'ullyses', 'iue']
 
 The default value for the ``mission`` attribute is "hst", referring to the Hubble Space Telescope.
 
@@ -71,8 +74,8 @@ The default value for the ``mission`` attribute is "hst", referring to the Hubbl
    >>> print("Default mission:", MastMissions.mission)
    Default mission: hst
 
-This attribute can be modified at any time to set a new default, and the mission will be validated when set. This attribute can be set
-when instantiating a ``MastMissions`` object or modified later.
+This attribute can be modified at any time to set a new default, and the mission will be validated when set.
+This attribute can be set when instantiating a ``MastMissions`` object or modified later.
 
 .. doctest-remote-data::
 
@@ -80,8 +83,9 @@ when instantiating a ``MastMissions`` object or modified later.
    >>> print("New mission:", MastMissions.mission)
    New mission: jwst
 
-You can create multiple instances of ``MastMissions`` with a different default mission, which may be useful for comparing results
-across missions or for running multiple queries with different missions in the same script without having to specify the mission each time.
+You can create multiple instances of ``MastMissions`` with different default missions. This may be useful
+for comparing results across missions or for running multiple queries with different missions in the same
+script without having to specify the mission each time.
 
 .. doctest-remote-data::
 
@@ -97,17 +101,18 @@ across missions or for running multiple queries with different missions in the s
 Querying Missions
 ==================
 
-The MastMissions interface provides three closely related query methods. All three methods return results as an `~astropy.table.Table`
-and all three support column-based filtering, sorting, and result limiting. The primary difference between them is how positional
-constraints are specified.
+The MastMissions interface provides three closely related query methods. All three methods return
+results as a `~astropy.table.Table`, and all three methods support column-based filtering, sorting,
+and result limiting. The primary difference between them is how positional constraints are specified.
 
 At a high level:
-  - `~astroquery.mast.MastMissionsClass.query_criteria` is the most flexible method. It supports purely column-based queries,
-    purely positional queries, or a combination of both.
 
-  - `~astroquery.mast.MastMissionsClass.query_region` is a convenience wrapper for positional queries using coordinates.
+- `~astroquery.mast.MastMissionsClass.query_criteria` is the most flexible method. It supports purely column-based queries,
+  purely positional queries, or a combination of both.
 
-  - `~astroquery.mast.MastMissionsClass.query_object` is a convenience wrapper for positional queries using object names.
+- `~astroquery.mast.MastMissionsClass.query_region` is a convenience wrapper for positional queries using coordinates.
+
+- `~astroquery.mast.MastMissionsClass.query_object` is a convenience wrapper for positional queries using object names.
 
 Query Parameters
 ----------------
@@ -155,15 +160,16 @@ Positional constraints are optional.
 
 Supported positional parameters include:
 
-  - ``coordinates`` : Sky coordinates around which to perform a cone search.
-  - ``object_name`` : Name(s) of the object(s) around which to perform a cone search.
-  - ``resolver`` : Resolver service to use for object name resolution.
-  - ``radius`` : Radius of the cone searches around the specified coordinates or object names. Can be defined as an `~astropy.units.Quantity`,
-    a string with units (e.g., ``"10 arcsec"``), or a numeric value interpreted as degrees. The maximum supported query radius is 30 arcminutes.
+- ``coordinates`` : Sky coordinates around which to perform a cone search.
+- ``object_name`` : Name(s) of the object(s) around which to perform a cone search.
+- ``resolver`` : Resolver service to use for object name resolution.
+- ``radius`` : Radius of the cone searches around the specified coordinate(s) or object name(s). Can be
+  defined as an `~astropy.units.Quantity`, a string with units (e.g., ``"10 arcsec"``), or a numeric value
+  interpreted as degrees. The maximum supported query radius is 30 arcminutes.
 
-Multiple coordinates or objects may be queried in a single request. The ``coordinates`` and ``object_names`` parameters
-accept a single value, an iterable of values, or a comma-separated string. When multiple values are provided for either parameter,
-results matching *any* of the supplied positions are returned.
+Multiple coordinates or objects may be queried in a single request. The ``coordinates`` and ``object_names``
+parameters accept a single value, an iterable of values, or a comma-separated string. When multiple values
+are provided for either parameter, results matching *any* of the supplied positions are returned.
 
 .. doctest-remote-data::
 
@@ -172,11 +178,15 @@ results matching *any* of the supplied positions are returned.
    >>> select_cols = ["sci_targname", "sci_pep_id", "sci_status"]
    >>> results = MastMissions.query_criteria(
    ...     mission="hst",
-   ...     coordinates=[SkyCoord(245.89675, -26.52575, unit='deg'), "205.54842 28.37728"],
+   ...     coordinates=[
+   ...         SkyCoord(245.89675, -26.52575, unit='deg'),
+   ...         "205.54842 28.37728",
+   ...     ],
    ...     object_names=["M2", "M9"],
    ...     radius=0.1,
    ...     select_cols=select_cols,
-   ...     sort_by="search_pos")
+   ...     sort_by="search_pos"
+   ... )
    >>> results.pprint(max_width=-1)  # doctest: +IGNORE_OUTPUT
         search_pos     sci_data_set_name  sci_targname sci_pep_id       ang_sep        sci_status
    ------------------- ----------------- ------------- ---------- -------------------- ----------
@@ -230,7 +240,7 @@ Criteria syntax supports several operations:
 .. note::
 
   For the Roman mission, query methods also support the ``pass_id`` parameter as an alias for the ``pass`` column,
-  which refers to a single iteration of a pass plan. This is to avoid conflicts with the reserved Python keyword.
+  which refers to a single iteration of a pass plan. This avoids conflicts with the reserved Python keyword.
   Both ``pass`` and ``pass_id`` can also be used in ``select_cols`` and ``sort_by``; the returned column is named
   ``pass``. If the mission has an actual ``pass_id`` column, that name refers to the actual column instead.
 
@@ -257,9 +267,9 @@ Criteria syntax supports several operations:
 The `~astroquery.mast.MastMissionsClass.query_region` and `~astroquery.mast.MastMissionsClass.query_object` methods are
 convenience wrappers around `~astroquery.mast.MastMissionsClass.query_criteria`:
 
-  - `~astroquery.mast.MastMissionsClass.query_region` requires ``coordinates``.
+- `~astroquery.mast.MastMissionsClass.query_region` requires ``coordinates``.
 
-  - `~astroquery.mast.MastMissionsClass.query_object` requires ``object_names`` and an optional ``resolver``.
+- `~astroquery.mast.MastMissionsClass.query_object` requires ``object_names`` and an optional ``resolver``.
 
 Both methods also accept column-based criteria, which are applied in the same way as in `~astroquery.mast.MastMissionsClass.query_criteria`.
 
@@ -343,9 +353,9 @@ The keyword corresponding to the dataset ID varies between missions and can be r
    sci_data_set_name
    >>> products = MastMissions.get_product_list(datasets[:2][dataset_id_kwd])
 
-Some products may be associated with multiple datasets, and this table may contain duplicates.
-To return a list of products with unique filenames, use the `~astroquery.mast.MastMissionsClass.get_unique_product_list`
-function.
+Some products may be associated with multiple datasets, so this table may contain duplicates.
+To return a `~astropy.table.Table` of products with unique filenames, use the 
+`~astroquery.mast.MastMissionsClass.get_unique_product_list` function.
 
 .. doctest-remote-data::
    >>> unique_products = MastMissions.get_unique_product_list(datasets[:2])  # doctest: +IGNORE_OUTPUT
@@ -356,24 +366,28 @@ Filtering Data Products
 -----------------------
 
 In many cases, you will not need to download every product that is associated with a dataset. The
-`~astroquery.mast.MastMissionsClass.filter_products` function allows for filtering based on file extension (``extension``)
-and any other of the product fields.
+`~astroquery.mast.MastMissionsClass.filter_products` function allows for filtering based on file
+extension (``extension``) and any other product field.
 
-The **AND** operation is applied between filters, and the **OR** operation is applied within each filter set, except in the case of negated values.
+The **AND** operation is applied between filters, and the **OR** operation is applied within each filter
+set, except in the case of negated values.
 
-A filter value can be negated by prefiing it with ``!``, meaning that rows matching that value will be excluded from the results.
-When any negated value is present in a filter set, any positive values in that set are combined with **OR** logic, and the negated
-values are combined with **AND** logic against the positives.
+A filter value can be negated by prefixing it with ``!``, meaning that rows matching that value will be
+excluded from the results. When any negated value is present in a filter set, any positive values in
+that set are combined with **OR** logic, and the negated values are combined with **AND** logic against
+the positives.
 
 For example:
-  - ``file_suffix=['A', 'B', '!C']`` → (file_suffix != C) AND (file_suffix == A OR file_suffix == B)
-  - ``size=['!14400', '<20000']`` → (size != 14400) AND (size < 20000)
+
+- ``file_suffix=['A', 'B', '!C']`` → (file_suffix != C) AND (file_suffix == A OR file_suffix == B)
+- ``size=['!14400', '<20000']`` → (size != 14400) AND (size < 20000)
 
 For columns with numeric data types (``int`` or ``float``), filter values can be expressed in several ways:
-  - A single number: ``size=100``
-  - A range in the form "start..end": ``size="100..1000"``
-  - A comparison operator followed by a number: ``size=">=1000"``
-  - A list of expressions (OR logic): ``size=[100, "500..1000", ">=1500"]``
+
+- A single number: ``size=100``
+- A range in the form "start..end": ``size="100..1000"``
+- A comparison operator followed by a number: ``size=">=1000"``
+- A list of expressions (OR logic): ``size=[100, "500..1000", ">=1500"]``
 
 The filter below returns FITS products that are "science" type **and** less than or equal to 20,000 bytes in size
 **and** have a ``file_suffix`` of "ASN" (association files) **or** "JIF" (job information files).
@@ -390,170 +404,6 @@ The filter below returns FITS products that are "science" type **and** less than
    ---------------------------- ------ --------- ... -------------- ----- -------
    JBTAA0010_jbtaa0010_asn.fits PUBLIC JBTAA0010 ...            AUX 11520 science
    JBTAA0020_jbtaa0020_asn.fits PUBLIC JBTAA0020 ...            AUX 11520 science
-
-
-Cloud Data Access
-=================
-
-The `~astroquery.mast.MastMissionsClass` provides the `~astroquery.mast.MastMissionsClass.get_cloud_uri_map` method
-for locating data products on the cloud. If a public MAST dataset is hosted on our Amazon S3 bucket, this method
-can be used to locate the corresponding cloud URIs. For many workflows, cloud access can be significantly faster,
-more scalable, and more cost-effective than downloading files locally.
-
-Why Use Cloud Data Access?
-----------------------------
-
-Cloud-hosted MAST data are stored in public object storage (Amazon S3) alongside cloud computing resources.
-Using cloud access allows users to:
-
-  - **Avoid large downloads** by reading data directly from cloud storage.
-  - **Reduce local storage needs** by processing data in the cloud without downloading files.
-  - **Improve performance** by leveraging high-bandwidth connections between cloud compute and storage.
-  - **Scale analyses** by utilizing cloud compute resources that can be adjusted to meet workload demands.
-  - **Enable reproducible workflows** that operate in a consistent cloud environment.
-
-Cloud access is particularly well-suited for:
-  - Large surveys or multi-terabyte datasets.
-  - Batch processing or pipeline workflows.
-  - JupyterHub or notebook environments hosted in the cloud.
-  - Situations where only a subset of files will be accessed.
-
-Traditional downloads remain appropriate when:
-  - Working with small datasets that fit comfortably on local storage.
-  - Working offline or in environments without internet access.
-  - Using software that requires local file access.
-
-Accessing Data via Cloud URIs
------------------------------
-
-Instead of downloading files, you can access them directly via their cloud URIs using the
-`~astroquery.mast.MastMissionsClass.get_cloud_uri_map` method. This allows you to work with the data in the cloud
-without needing to store it locally. The method accepts a table or list of products and returns a mapping of product
-URIs to their cloud locations.
-
-Cloud URIs may be returned as:
-
-  - Native cloud URIs (e.g., ``s3://stpubdata...``)
-  - HTTP URLs suitable for streaming (set ``full_url=True``)
-
-By default, Roman products return presigned HTTPS URLs; other missions return native cloud URIs.
-For Roman products, explicitly set ``full_url=False`` to obtain an unsigned S3 URI, or set
-``include_bucket=False`` to obtain the relative path. These forms may require separate AWS credentials.
-Presigned URLs expire and grant access to the product, so treat them as secrets. The consuming tool must
-support HTTPS and the request method for which the URL was signed.
-
-The following example demonstrates how to map a list of data products to their corresponding cloud URIs.
-
-.. doctest-remote-data::
-
-   >>> cloud_uri_map = missions.get_cloud_uri_map(
-   ...     ["IBZDA1010/ibzda1010_drz.fits", "IBZDA1010/ibzda1010_drc.fits"],
-   ...     full_url=False,
-   ...     include_bucket=True
-   ... )
-   INFO: Using the S3 STScI public dataset [astroquery.mast.cloud]
-   >>> print(cloud_uri_map)
-   {'IBZDA1010/ibzda1010_drz.fits': 's3://stpubdata/hst/public/ibzd/ibzda1010/ibzda1010_drz.fits',
-    'IBZDA1010/ibzda1010_drc.fits': 's3://stpubdata/hst/public/ibzd/ibzda1010/ibzda1010_drc.fits'}
-
-Once the URIs are obtained, they can be used directly in cloud-based workflows or with cloud-enabled libraries such as
-`Astropy <https://docs.astropy.org/en/stable/io/fits/usage/cloud.html>`__.
-
-
-Reading Data Products
-======================
-
-The `~astroquery.mast.MastMissionsClass.get_product` function allows you to read FITS or ASDF data products directly into memory as `~astropy.io.fits.HDUList`
-or `~asdf.AsdfFile` objects, respectively. The function accepts a product URI or a direct filename (for certain missions) as input.
-
-FITS files are opened with `~astropy.io.fits.open` and are downloaded and cached locally.
-
-ASDF products from the Roman Space Telescope mission are opened directly with `~fsspec.open` and `~asdf.open`. The products are
-read as `~asdf.AsdfFile` objects from presigned S3 URLs, without being downloaded locally. This requires the ``asdf`` and ``fsspec``
-packages to be installed. Other optional packages for reading products may be required depending on the product type and file format.
-These packages are ``gwcs``, ``lz4``, and ``roman_datamodels``. To install astroquery with all optional dependencies,
-use ``pip install astroquery[all]``.
-
-Remember that this method returns an open file object, so it is the user's responsibility to close the file when finished. This can be done
-with a context manager or by calling the ``close()`` method on the returned object.
-
-.. doctest-remote-data::
-   >>> obj = missions.get_product("jbtaa0010_asn.fits")  # doctest: +IGNORE_OUTPUT
-   >>> print(type(obj))
-   <class 'astropy.io.fits.hdu.hdulist.HDUList'>
-   >>> obj.info()  # doctest: +IGNORE_OUTPUT
-   Filename: /Users/user/.astropy/cache/download/url/6555b8e890752df0de737940d3afb19d/contents
-   No.    Name      Ver    Type      Cards   Dimensions   Format
-     0  PRIMARY       1 PrimaryHDU      44   ()
-     1  ASN           1 BinTableHDU     25   3R x 3C   [14A, 14A, L]
-   >>> obj.close()
-
-Cloud Data Access
-=================
-
-The `~astroquery.mast.MastMissionsClass` provides the `~astroquery.mast.MastMissionsClass.get_cloud_uri_map` method
-for locating data products on the cloud. If a public MAST dataset is hosted on our Amazon S3 bucket, this method
-can be used to locate the corresponding cloud URIs. For many workflows, cloud access can be significantly faster,
-more scalable, and more cost-effective than downloading files locally.
-
-Why Use Cloud Data Access?
-----------------------------
-
-Cloud-hosted MAST data are stored in public object storage (Amazon S3) alongside cloud computing resources.
-Using cloud access allows users to:
-
-  - **Avoid large downloads** by reading data directly from cloud storage.
-  - **Reduce local storage needs** by processing data in the cloud without downloading files.
-  - **Improve performance** by leveraging high-bandwidth connections between cloud compute and storage.
-  - **Scale analyses** by utilizing cloud compute resources that can be adjusted to meet workload demands.
-  - **Enable reproducible workflows** that operate in a consistent cloud environment.
-
-Cloud access is particularly well-suited for:
-  - Large surveys or multi-terabyte datasets.
-  - Batch processing or pipeline workflows.
-  - JupyterHub or notebook environments hosted in the cloud.
-  - Situations where only a subset of files will be accessed.
-
-Traditional downloads remain appropriate when:
-  - Working with small datasets that fit comfortably on local storage.
-  - Working offline or in environments without internet access.
-  - Using software that requires local file access.
-
-Accessing Data via Cloud URIs
------------------------------
-
-Instead of downloading files, you can access them directly via their cloud URIs using the
-`~astroquery.mast.MastMissionsClass.get_cloud_uri_map` method. This allows you to work with the data in the cloud
-without needing to store it locally. The method accepts a table or list of products and returns a mapping of product
-URIs to their cloud locations.
-
-Cloud URIs may be returned as:
-
-  - Native cloud URIs (e.g., ``s3://stpubdata...``)
-  - HTTP URLs suitable for streaming (set ``full_url=True``)
-
-By default, Roman products return presigned HTTPS URLs; other missions return native cloud URIs.
-For Roman products, explicitly set ``full_url=False`` to obtain an unsigned S3 URI, or set
-``include_bucket=False`` to obtain the relative path. These forms may require separate AWS credentials.
-Presigned URLs expire and grant access to the product, so treat them as secrets. The consuming tool must
-support HTTPS and the request method for which the URL was signed.
-
-The following example demonstrates how to map a list of data products to their corresponding cloud URIs.
-
-.. doctest-remote-data::
-
-   >>> cloud_uri_map = missions.get_cloud_uri_map(
-   ...     ["IBZDA1010/ibzda1010_drz.fits", "IBZDA1010/ibzda1010_drc.fits"],
-   ...     full_url=False,
-   ...     include_bucket=True
-   ... )
-   INFO: Using the S3 STScI public dataset [astroquery.mast.cloud]
-   >>> print(cloud_uri_map)
-   {'IBZDA1010/ibzda1010_drz.fits': 's3://stpubdata/hst/public/ibzd/ibzda1010/ibzda1010_drz.fits',
-    'IBZDA1010/ibzda1010_drc.fits': 's3://stpubdata/hst/public/ibzd/ibzda1010/ibzda1010_drc.fits'}
-
-Once the URIs are obtained, they can be used directly in cloud-based workflows or with cloud-enabled libraries such as
-`Astropy <https://docs.astropy.org/en/stable/io/fits/usage/cloud.html>`__.
 
 
 Downloading Data
@@ -615,3 +465,104 @@ the ``local_path`` keyword argument.
    Downloading URL https://mast.stsci.edu/search/hst/api/v0.1/retrieve_product?product_name=JBTAA0010%2Fjbtaa0010_asn.fits to jbtaa0010_asn.fits ... [Done]
    >>> print(result)
    ('COMPLETE', None, None)
+
+
+
+Cloud Data Access
+=================
+
+The `~astroquery.mast.MastMissionsClass` provides the `~astroquery.mast.MastMissionsClass.get_cloud_uri_map` method
+for locating data products in the cloud. If a public MAST dataset is hosted on our Amazon S3 bucket, this method
+can be used to locate the corresponding cloud URIs. For many workflows, cloud access can be significantly faster,
+more scalable, and more cost-effective than downloading files locally.
+
+Why Use Cloud Data Access?
+----------------------------
+
+Cloud-hosted MAST data are stored in public object storage (Amazon S3) alongside cloud computing resources.
+Using cloud access allows users to:
+
+- **Avoid large downloads** by reading data directly from cloud storage.
+- **Reduce local storage needs** by processing data in the cloud without downloading files.
+- **Improve performance** by leveraging high-bandwidth connections between cloud compute and storage.
+- **Scale analyses** by utilizing cloud compute resources that can be adjusted to meet workload demands.
+- **Enable reproducible workflows** that operate in a consistent cloud environment.
+
+Cloud access is particularly well-suited for:
+
+- Large surveys or multi-terabyte datasets.
+- Batch processing or pipeline workflows.
+- JupyterHub or notebook environments hosted in the cloud.
+- Situations where only a subset of files will be accessed.
+
+Traditional downloads remain appropriate when:
+
+- Working with small datasets that fit comfortably on local storage.
+- Working offline or in environments without internet access.
+- Using software that requires local file access.
+
+Accessing Data via Cloud URIs
+-----------------------------
+
+Instead of downloading files, you can access them directly via their cloud URIs using the
+`~astroquery.mast.MastMissionsClass.get_cloud_uri_map` method, allowing you to work with the data in the cloud
+without needing to store it locally. This method accepts a table or list of products and returns a mapping of product
+URIs to their cloud locations.
+
+Cloud URIs may be returned as:
+
+- Native cloud URIs (e.g., ``s3://stpubdata...``)
+- HTTP URLs suitable for streaming (set ``full_url=True``)
+
+By default, Roman products return presigned HTTPS URLs; other missions return native cloud URIs.
+For Roman products, explicitly set ``full_url=False`` to obtain an unsigned S3 URI, or set
+``include_bucket=False`` to obtain the relative path. These forms may require separate AWS credentials.
+Presigned URLs expire and grant access to the product, so treat them as secrets. The consuming tool must
+support HTTPS and the request method for which the URL was signed.
+
+The following example demonstrates how to map a list of data products to their corresponding cloud URIs.
+
+.. doctest-remote-data::
+
+   >>> cloud_uri_map = missions.get_cloud_uri_map(
+   ...     ["IBZDA1010/ibzda1010_drz.fits", "IBZDA1010/ibzda1010_drc.fits"],
+   ...     full_url=False,
+   ...     include_bucket=True
+   ... )
+   INFO: Using the S3 STScI public dataset [astroquery.mast.cloud]
+   >>> print(cloud_uri_map)
+   {'IBZDA1010/ibzda1010_drz.fits': 's3://stpubdata/hst/public/ibzd/ibzda1010/ibzda1010_drz.fits',
+    'IBZDA1010/ibzda1010_drc.fits': 's3://stpubdata/hst/public/ibzd/ibzda1010/ibzda1010_drc.fits'}
+
+Once the URIs are obtained, they can be used directly in cloud-based workflows or with cloud-enabled libraries
+such as `Astropy <https://docs.astropy.org/en/stable/io/fits/usage/cloud.html>`__.
+
+
+Reading Data Products
+======================
+
+The `~astroquery.mast.MastMissionsClass.get_product` function allows you to read FITS or ASDF data products
+directly into memory as `~astropy.io.fits.HDUList` or `~asdf.AsdfFile` objects, respectively. The function
+accepts a product URI or a direct filename (for certain missions) as input.
+
+FITS files are opened with `~astropy.io.fits.open` and are downloaded and cached locally.
+
+ASDF products from the Roman Space Telescope mission are opened directly with `~fsspec.open` and `~asdf.open`.
+The products are read as `~asdf.AsdfFile` objects from presigned S3 URLs, without being downloaded locally.
+This requires the ``asdf`` and ``fsspec`` packages to be installed. Other optional packages for reading products
+may be required depending on the product type and file format. These packages are ``gwcs``, ``lz4``, and
+``roman_datamodels``. To install astroquery with all optional dependencies, use ``pip install astroquery[all]``.
+
+Remember that this method returns an open file object, so it is the user's responsibility to close the file when
+finished. This can be done with a context manager or by calling the ``close()`` method on the returned object.
+
+.. doctest-remote-data::
+   >>> obj = missions.get_product("jbtaa0010_asn.fits")  # doctest: +IGNORE_OUTPUT
+   >>> print(type(obj))
+   <class 'astropy.io.fits.hdu.hdulist.HDUList'>
+   >>> obj.info()  # doctest: +IGNORE_OUTPUT
+   Filename: /Users/user/.astropy/cache/download/url/6555b8e890752df0de737940d3afb19d/contents
+   No.    Name      Ver    Type      Cards   Dimensions   Format
+     0  PRIMARY       1 PrimaryHDU      44   ()
+     1  ASN           1 BinTableHDU     25   3R x 3C   [14A, 14A, L]
+   >>> obj.close()
