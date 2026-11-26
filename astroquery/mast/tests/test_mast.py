@@ -9,6 +9,7 @@ import warnings
 from pathlib import Path
 from shutil import copyfile
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import MagicMock, patch
 
 import astropy.units as u
@@ -57,6 +58,7 @@ DATA_FILES = {'Mast.Caom.Cone': 'caom.json',
               'mission_columns': 'mission_columns.json',
               'mission_products': 'mission_products.json',
               'available_missions': 'available_missions.html',
+              'product_dl_info': 'product_dl_info.json',
               'columnsconfig': 'columnsconfig.json',
               'ticcolumns': 'ticcolumns.json',
               'ticcol_filtered': 'ticcolumns_filtered.json',
@@ -106,15 +108,6 @@ def patch_post(mocker):
     mocker.patch.object(Tesscut, '_download_file', tesscut_download_mockreturn)
     mocker.patch.object(Zcut, '_download_file', zcut_download_mockreturn)
     mocker.patch.object(core.MastQueryWithLogin, '_download_file', download_mockreturn)
-
-    def roman_cloud_location(download_url):
-        if 'path_style' in download_url:
-            return 'https://s3.us-west-2.amazonaws.com/example-bucket/path_style.asdf?signature=abc123'
-        if 'invalid' in download_url:
-            return 'invalid'
-        return 'https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123'
-
-    mocker.patch.object(type(MastMissions), '_get_roman_cloud_location', side_effect=roman_cloud_location)
 
     return mocker
 
@@ -212,16 +205,22 @@ def request_mockreturn(url, params={}, headers=None, allow_redirects=False):
         filename = data_path(DATA_FILES['get_cloud_paths'])
     elif 'search/docs' in url:
         filename = data_path(DATA_FILES['available_missions'])
-    elif 'roman' in url and not allow_redirects:
-        if 'path_style' in url:
-            redirect_url = 'https://s3.us-west-2.amazonaws.com/example-bucket/path_style.asdf?signature=abc123'
-        elif 'invalid' in url:
-            redirect_url = 'invalid'
-        else:
-            redirect_url = 'https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123'
-        response = MagicMock()
-        response.headers = {'Location': redirect_url}
-        return response
+    elif 'get_product_dl_info' in url:
+        product_name = parse_qs(urlsplit(url).query)['product_name'][0]
+        if 'unauthorized' in product_name:
+            return MockResponse(json.dumps({'url': f'https://download.example/{product_name}'}).encode())
+        if '/roman' in url:
+            if 'path_style' in product_name:
+                download_url = 'https://s3.us-west-2.amazonaws.com/example-bucket/path_style.asdf?signature=abc123'
+            elif 'invalid' in product_name:
+                download_url = 'invalid'
+            elif 'presigned' in product_name:
+                download_url = ('https://s3.us-west-2.amazonaws.com/example-bucket/test.asdf?'
+                                'X-Amz-Credential=example%2Fscope&X-Amz-Signature=abc%2B123')
+            else:
+                download_url = 'https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123'
+            return MockResponse(json.dumps({'url': download_url}).encode())
+        filename = data_path(DATA_FILES['product_dl_info'])
     with open(filename, 'rb') as infile:
         content = infile.read()
     return MockResponse(content)
@@ -890,22 +889,18 @@ def test_missions_get_cloud_uri_map_roman_path_style():
 
 
 @pytest.mark.parametrize('include_bucket', [True, False, None])
-def test_missions_get_cloud_uri_map_roman_presigned_query(mocker, include_bucket):
+def test_missions_get_cloud_uri_map_roman_presigned_query(include_bucket):
     missions = MastMissions(mission='roman')
     query = 'X-Amz-Credential=example%2Fscope&X-Amz-Signature=abc%2B123'
-    mocker.patch.object(
-        type(MastMissions),
-        '_get_roman_cloud_location',
-        return_value=f'https://s3.us-west-2.amazonaws.com/example-bucket/test.asdf?{query}',
-    )
 
-    result = missions.get_cloud_uri_map('mast:ROMAN/product/test.asdf', include_bucket=include_bucket)
+    uri = 'mast:ROMAN/product/presigned.asdf'
+    result = missions.get_cloud_uri_map(uri, include_bucket=include_bucket)
     if include_bucket is None:
         expected = f'https://s3.us-west-2.amazonaws.com/example-bucket/test.asdf?{query}'
     else:
         prefix = 's3://example-bucket/' if include_bucket else ''
         expected = f'{prefix}test.asdf'
-    assert result == {'mast:ROMAN/product/test.asdf': expected}
+    assert result == {uri: expected}
 
 
 def test_missions_get_cloud_uri_map_roman_invalid():
@@ -921,11 +916,8 @@ def test_missions_get_cloud_uri_map_roman_invalid():
 def test_missions_get_cloud_uri_map_roman_http_error(mocker):
     missions = MastMissions(mission='roman')
     uri = 'mast:ROMAN/product/test.asdf'
-    mocker.patch.object(
-        type(MastMissions),
-        '_get_roman_cloud_location',
-        side_effect=HTTPError('download failed'),
-    )
+    mocker.patch.object(type(MastMissions), '_verify_mission')
+    mocker.patch.object(utils, '_simple_request', side_effect=HTTPError('download failed'))
 
     with pytest.warns(NoResultsWarning, match='Failed to get Roman cloud location'):
         result = missions.get_cloud_uri_map([uri], include_bucket=True, full_url=False)
@@ -963,30 +955,11 @@ def mock_fits_open(mocker):
 
 @pytest.fixture
 def mock_asdf_open(mocker):
-    """Mock asdf.open and fsspec.filesystem for ASDF file reading without network access."""
-    # Mock response from requests.get for the initial URL fetch
-    mock_response = MagicMock()
-    mock_response.status_code = 307
-    mock_response.headers = {
-        "Location": "https://example-bucket.s3.amazonaws.com/test.asdf?signature=abc123"
-    }
-    mock_requests = MagicMock()
-    mock_requests.get.return_value = mock_response
-    mocker.patch("requests.get", mock_requests)
-
-    # Mock fsspec.filesystem and the file handle
-    mock_fs = MagicMock()
-    mock_file = MagicMock()
-    mock_fs.open.return_value = mock_file
-    mocker.patch("fsspec.filesystem", return_value=mock_fs)
-
-    # Create a mock AsdfFile
+    """Mock ASDF file reading without network access."""
     mock_asdf_file = MagicMock(spec=asdf.AsdfFile)
-
-    mock_asdf_open = mocker.patch("asdf.open", return_value=mock_asdf_file)
-    mocker.patch(
+    mock_asdf_open = mocker.patch(
         "astroquery.mast.missions._open_refreshing_asdf",
-        side_effect=lambda url, headers, **kwargs: mock_asdf_open(mock_file, **kwargs),
+        return_value=mock_asdf_file,
     )
     return mock_asdf_open
 
@@ -1155,10 +1128,6 @@ def test_missions_refreshing_http_filesystem_open(mocker, partial):
 def test_missions_open_refreshing_asdf(mocker):
     download_url = 'https://mast.example/retrieve_product?product_name=test.asdf'
     headers = {'Authorization': 'token test'}
-    s3_url = 'https://bucket.example/test.asdf?signature=abc'
-    response = MagicMock()
-    response.headers = {'Location': s3_url}
-    request = mocker.patch.object(missions_module.requests, 'get', return_value=response)
     file_object = object()
     file_system = MagicMock()
     file_system.open.return_value = file_object
@@ -1171,15 +1140,13 @@ def test_missions_open_refreshing_asdf(mocker):
     result = missions_module._open_refreshing_asdf(download_url, headers, copy_arrays=False)
 
     assert result is asdf_file
-    request.assert_called_once_with(download_url, headers=headers, allow_redirects=False)
-    response.raise_for_status.assert_called_once_with()
     file_system_class.assert_called_once_with(
         gateway_url=download_url,
         gateway_headers=headers,
         block_size=1024 * 1024,
         cache_type='bytes',
     )
-    file_system.open.assert_called_once_with(s3_url, 'rb')
+    file_system.open.assert_called_once_with(download_url, 'rb')
     asdf_open.assert_called_once_with(file_object, copy_arrays=False)
 
 

@@ -18,7 +18,6 @@ from urllib.parse import quote, urlsplit
 
 import astropy.units as u
 import numpy as np
-import requests
 from astropy.coordinates import Angle, BaseCoordinateFrame, SkyCoord
 from astropy.io import fits
 from astropy.table import Column, Row, Table, vstack
@@ -159,14 +158,6 @@ def _open_refreshing_asdf(download_url, headers, **kwargs):
     asdf.AsdfFile
         The opened ASDF file.
     """
-    # Perform an initial request to get the S3 URL for the ASDF file
-    response = requests.get(
-        download_url,
-        headers=headers,
-        allow_redirects=False,
-    )
-    response.raise_for_status()
-    s3_url = response.headers["Location"]
 
     # Open the ASDF file using the refreshing HTTP file system
     fs = _RefreshingHTTPFileSystem(
@@ -175,7 +166,7 @@ def _open_refreshing_asdf(download_url, headers, **kwargs):
         block_size=1 * 1024 * 1024,
         cache_type="bytes",
     )
-    file_object = fs.open(s3_url, "rb")
+    file_object = fs.open(download_url, "rb")
     return asdf.open(file_object, **kwargs)
 
 
@@ -933,7 +924,7 @@ class MastMissionsClass(MastQueryWithLogin):
 
         return products[filter_mask]
 
-    def _get_download_url(self, uri, mission=None):
+    def _get_download_url(self, uri, mission=None, ):
         """
         Construct the full download URL for a given data URI based on the mission.
 
@@ -952,21 +943,21 @@ class MastMissionsClass(MastQueryWithLogin):
         """
         current_mission = mission.lower() if mission else self.mission
 
-        if current_mission in ['hst', 'jwst', 'roman', 'roman_wfi', 'roman_spectra', 'roman_cgi', 'tess', 'hsla']:
-            # Certain missions have a dedicated endpoint for retrieving products
-            base_url = (f"{self._service_api_connection.MISSIONS_DOWNLOAD_URL}{current_mission}"
-                        "/api/v0.1/retrieve_product")
-            keyword = 'product_name'
-        else:
-            # HLSPs use MAST download URL
-            base_url = self._service_api_connection.MAST_DOWNLOAD_URL
-            keyword = 'uri'
-            # These files require a MAST URI and not just a filename
+        if current_mission in ['classy', 'ullyses', 'iue']:
             if not uri.startswith('mast'):
                 raise InvalidQueryError(f'For mission "{current_mission}", a full MAST URI is required '
                                         f'for downloading. Got "{uri}".')
 
-        return base_url + f'?{keyword}=' + quote(uri, safe='')
+        base_url = (f"{self._service_api_connection.MISSIONS_DOWNLOAD_URL}{current_mission}"
+                    "/api/v0.1/get_product_dl_info")
+        full_url = base_url + '?product_name=' + quote(uri, safe='')
+
+        # Make a request to get the full download information
+        response = utils._simple_request(full_url)
+        response.raise_for_status()
+        download_info = response.json()
+
+        return download_info.get('url', full_url)
 
     def _warn_no_auth(self, download_url):
         """
@@ -1338,7 +1329,7 @@ class MastMissionsClass(MastQueryWithLogin):
             for uri in data_uris:
                 # Get the presigned S3 URL for the Roman data product
                 try:
-                    s3_url = self._get_roman_cloud_location(self._get_download_url(uri, mission))
+                    s3_url = self._get_download_url(uri, mission)
                 except HTTPError as e:
                     warnings.warn(f"Failed to get Roman cloud location for {uri}: {e}", NoResultsWarning)
                     s3_url = None
@@ -1374,30 +1365,6 @@ class MastMissionsClass(MastQueryWithLogin):
             )
             return {str(uri): normalized_uri_map.get(normalized_uri)
                     for uri, normalized_uri in zip(data_uris, normalized_uris)}
-
-    def _get_roman_cloud_location(self, download_url):
-        """
-        Retrieves the cloud location for a Roman data product given its download URL.
-
-        Parameters
-        ----------
-        download_url : str
-            The download URL for the Roman data product.
-
-        Returns
-        -------
-        str
-            The cloud location URL for the Roman data product.
-        """
-        # Make an authenticated request to get the presigned S3 URL for the ASDF file
-        headers = {}
-        if self._authenticated:
-            headers["Authorization"] = f"token {self._auth_obj.session.cookies['mast_token']}"
-
-        resp = self._session.request("get", download_url, headers=headers, allow_redirects=False)
-        resp.raise_for_status()
-
-        return resp.headers.get("Location")
 
     @class_or_instance
     def get_column_list(self):

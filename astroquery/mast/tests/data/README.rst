@@ -62,3 +62,16 @@ To generate `~astroquery.mast.tests.data.resolver.json`, use the following:
     ...                              {'name': objects, 'outputFormat': 'json', 'resolveAll': 'true'})
     >>> with open('resolver.json', 'w') as file:
     ...     json.dump(resp.json(), file, indent=4)  # doctest: +SKIP
+
+
+To generate `~astroquery.mast.tests.data.product_dl_info.json`, use the following:
+
+.. doctest-remote-data::
+
+    >>> import json
+    >>> from astroquery.mast import utils
+    ...
+    >>> resp = utils._simple_request('https://mast.stsci.edu/search/hst/api/v0.1/product_dl_info',
+    ...                              {'product_name': 'z06g0101t_trl.fits'})
+    >>> with open('product_dl_info.json', 'w') as file:
+    ...     json.dump(resp.json(), file, indent=4)  # doctest: +SKIP
