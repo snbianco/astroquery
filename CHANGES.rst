@@ -29,6 +29,22 @@ mast
 
 - Updated ``Catalogs`` interface for MAST TAP catalogs, including collection/catalog discovery helpers and a unified query workflow across
   positional and non-positional searches. [#3582]
+- Added ``Catalog`` and ``CatalogColumn`` objects. A ``Catalog`` binds a
+  collection/catalog and provides column metadata, bound ``query_criteria``,
+  ``query_region``, and ``query_object`` methods, candidate discovery, and
+  ``crossmatch`` with another ``Catalog``.
+- Added ``Catalogs.crossmatch`` for server-side crossmatching. Two catalog
+  inputs can be provided with ``catalogs`` as collection names,
+  ``(collection, catalog)`` pairs, or ``Catalog`` objects, or through the
+  ``collection_1``/``catalog_1`` and ``collection_2``/``catalog_2`` parameters.
+  MAST and Roman catalogs can be crossmatched with each other.
+- Crossmatch column references and string column names can be used in selections,
+  sorting, and filters. ``select_cols`` accepts lists or comma-delimited
+  strings; shared names can be qualified with aliases or ``cat1``/``cat2``.
+  Results include alias-prefixed columns and ``separation`` in arcseconds by
+  default; ``include_separation=False`` omits it.
+- Added ``get_crossmatch_catalogs`` candidate discovery for catalogs with
+  identifiable RA/Dec columns.
 
 nrao
 ^^^^

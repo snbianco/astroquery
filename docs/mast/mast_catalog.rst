@@ -30,9 +30,8 @@ with a shared scientific or mission context (e.g., Hubble source catalogs, Gaia 
 Within a collection, one or more **catalogs** may be available, each with its own set of columns and capabilities.
 
 `~astroquery.mast.CatalogsClass` stores a ``collection`` and ``catalog`` as attributes. If no collection and/or catalog
-is specified in a query, these attributes will be used as defaults. The ``collection`` attribute is an object
-representing the current collection, and the ``catalog`` attribute is a string representing the name of the current
-catalog within that collection.
+is specified in a query, these attributes will be used as defaults. Both attributes are strings: ``collection`` is the
+collection name, and ``catalog`` is the catalog name within that collection.
 
 The default value for the ``collection`` attribute is "hsc", referring to the `Hubble Source Catalog version 3 <https://archive.stsci.edu/hst/hsc/>`_.
 The default value for ``catalog`` is "dbo.SumMagAper2CatView". This is a summary source catalog with data describing sources detected in Hubble images,
@@ -49,11 +48,6 @@ including their positions, magnitudes, and other properties.
 
 These attributes may be changed at any time to set new defaults. Both ``collection`` and ``catalog`` will be validated
 when set. When changing the collection, the catalog will be reset to the default for the new collection.
-
-These attributes can be set with parameters when instantiating a `~astroquery.mast.CatalogsClass` object, or they can be changed
-at any time after instantiation to set new defaults for subsequent queries. Both ``collection`` and ``catalog`` will be validated when set.
-``collection`` must be a valid collection name, and ``catalog`` must be a valid catalog within the specified collection. When changing the
-collection, the catalog will be reset to the default catalog for the new collection.
 
 Here, we'll change the value of ``collection`` to "ullyses", referring to the
 `Hubble Ultraviolet Legacy Library of Young Stars as Essential Standards (ULLYSES) <https://ullyses.stsci.edu/>`_ program. The default catalog
@@ -212,7 +206,6 @@ Shared Query Parameters
 The following parameters are shared across all three query methods:
 
 - ``collection`` : The name of the catalog collection to query. If not specified, the ``collection`` class attribute will be used as the default.
-- ``collection``: The name of the catalog collection to query. If not specified, the ``collection`` class attribute will be used as the default.
 - ``catalog``: The name of the catalog to query within the specified collection. If not specified, the ``catalog`` class attribute will be used as the default.
 - ``limit``: An integer specifying the maximum number of results to return. The default is 5,000.
 - ``offset``: An integer specifying the number of results to skip before starting to return results. This is useful for paginating through large result sets. Default is 0.
@@ -516,6 +509,143 @@ For very long-running queries, you can also run the query in asynchronous mode b
    ... )
    >>> print('Number of matching records:', count)
    Number of matching records: 6735
+
+Crossmatching Catalogs
+======================
+
+Collection-based interface
+--------------------------
+
+``CatalogsClass.crossmatch`` performs a server-side ADQL JOIN.
+Both catalogs need identifiable RA/Dec columns. They may be on the same TAP
+endpoint; the MAST and Roman endpoints can also be crossmatched, with the Roman
+catalog placed first in the query.
+
+Use ``catalogs`` to provide two collection names or ``(collection, catalog)``
+pairs:
+
+.. code-block:: python
+
+   from astroquery.mast import Catalogs
+   import astropy.units as u
+
+   result = Catalogs.crossmatch(
+      catalogs=("gaiadr3", ("tic_v82", "source")),
+       coordinates="83.6331 22.0145",
+       search_radius=0.01 * u.deg,
+       match_radius=3 * u.arcsec,
+       select_cols="cat1.source_id, cat1.ra, cat2.ra",
+       sort_by="separation",
+       limit=100,
+   )
+
+Alternatively, pass ``collection_1``, ``catalog_1``, ``collection_2``, and
+``catalog_2``. Do not combine ``catalogs`` with the explicit arguments. If a
+target is omitted, the current ``CatalogsClass`` instance defaults are used,
+but at least one other catalog must be specified explicitly.
+
+Column names present in both catalogs must be qualified. ``cat1`` and ``cat2``
+always refer to the first and second catalog. Collection names are also
+accepted as aliases; when both collections match, default aliases gain ``_1``
+and ``_2`` suffixes. Custom aliases can be set with the ``alias_1`` and
+``alias_2`` parameters, but cannot be ``cat1`` or ``cat2`` (case-insensitive).
+Both dotted and underscore forms are accepted in ``select_cols``,
+``sort_by``, filters, and keyword criteria. Use dotted qualification when an
+underscore-qualified name collides with a real column name.
+
+``select_cols`` accepts a list of names or a comma-delimited string. Selecting
+the same column more than once, or specifying the same filter under multiple
+names, raises an error.
+
+Result columns are named ``<alias>.<column>``. By default, all columns from
+both catalogs are returned, followed by ``separation`` in arcseconds. Set
+``include_separation=False`` to omit it. ``count_only=True`` returns the number
+of matching pairs without a separation column. ``return_adql=True`` returns the
+generated query without executing the JOIN; metadata requests may still be
+needed.
+
+.. important::
+
+   Crossmatching returns **all pairs** whose separation is strictly less than
+   ``match_radius``, not just each source's nearest neighbor. ``limit`` limits
+   pairs, not unique sources. The maximum ``match_radius`` is 5 arcseconds.
+
+   ``coordinates`` or ``object_name`` restricts only the first catalog using
+   ``search_radius`` (maximum 30 arcminutes). ``region`` also restricts only
+   the first catalog and supplies its own geometry. Specify at most one of
+   ``coordinates``, ``object_name``, or ``region``. Bare numeric radii are in
+   degrees. With no spatial constraint, the match covers the full catalogs
+   subject to filters and may be expensive. Consider ``run_async=True`` for
+   long-running queries. No epoch propagation or proper-motion correction is
+   performed.
+
+Catalog Objects
+===============
+
+`~astroquery.mast.Catalog` binds a collection and catalog for querying one
+catalog. It provides ``query_criteria``, ``query_region``, and ``query_object``
+methods that use the bound collection and catalog:
+
+.. code-block:: python
+
+   from astroquery.mast import Catalog
+
+   gaia = Catalog("gaiadr3", "gaia_source")
+   result = gaia.query_criteria(
+      source_id=3403818211227300224,
+      select_cols=gaia["source_id", "ra", "dec"],
+   )
+
+``catalog.columns`` returns column metadata. ``catalog.ra``
+and ``catalog["ra"]`` return the same immutable column reference. Indexing
+multiple names returns a tuple that can be grouped in ``select_cols``. Column
+lookup is case-insensitive and checked against metadata. Use indexing for
+columns whose names collide with methods or attributes, such as
+``catalog["columns"]``. Catalog-bound query methods accept references from that
+catalog in ``select_cols``, ``sort_by``, and ``filters``; they do not accept
+``collection`` or ``catalog`` overrides.
+
+Crossmatching with Catalog objects
+----------------------------------
+
+Two Catalog objects can be passed directly to ``crossmatch``. Their column
+references carry ownership, so shared names can be selected and filtered
+without manually qualifying each column:
+
+.. code-block:: python
+
+   from astroquery.mast import Catalog, Catalogs
+
+   gaia = Catalog("gaiadr3", "gaia_source")
+   tic = Catalog("tic_v82", "source")
+   matches = gaia.crossmatch(
+      tic,
+      coordinates="83.648442803 22.0103255",
+      filters={gaia.ra: "83..84"},
+      select_cols=[gaia["ra", "dec", "source_id"], tic["ra", "dec"]],
+   )
+
+The same objects can be used with the collection-based entry point as
+``Catalogs.crossmatch(catalogs=(gaia, tic))``, or in the explicit
+``catalog_1`` and ``catalog_2`` parameters. ``CatalogColumn`` references can be
+used in ``select_cols``, ``sort_by``, and filter keys for these calls as well.
+
+The bound ``Catalog.get_crossmatch_catalogs()`` method lists candidate catalogs
+for that object. The equivalent collection-based method is
+``CatalogsClass.get_crossmatch_catalogs``:
+
+.. code-block:: python
+
+   candidates = gaia.get_crossmatch_catalogs()
+   candidates.pprint()
+
+The returned table has ``collection_name`` and ``catalog_name`` columns. It
+includes catalogs with identifiable RA/Dec columns on the same TAP endpoint;
+crossmatching between the MAST and Roman endpoints is also supported by
+``crossmatch``. Candidate discovery is not a guarantee that every pair will
+work, and fetching metadata for the first call may require several requests.
+For MAST grouped catalogs, the returned display names omit the ``mast_cat_``
+prefix.
 
 Deprecated Interfaces
 ======================
