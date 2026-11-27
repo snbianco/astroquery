@@ -2724,6 +2724,10 @@ def test_catalogs_crossmatch_radius_limits(name, radius):
     ({"select_cols": ["cat1.ra", "tic_1.ra"]}, "Duplicate output"),
     ({"alias_1": "same", "alias_2": "SAME"}, "must be distinct"),
     ({"alias_1": "cat2"}, "reserved"),
+    ({"alias_2": "cat1"}, "reserved"),
+    ({"alias_1": "CAT1"}, "reserved"),
+    ({"alias_2": "CAT2"}, "reserved"),
+    ({"alias_1": "cat1", "alias_2": "cat1"}, "reserved"),
     ({"sort_by": "separation", "include_separation": False}, "not found"),
 ])
 def test_catalogs_crossmatch_column_validation(patch_tap, kwargs, message):
@@ -2756,26 +2760,33 @@ def test_catalogs_get_crossmatch_catalogs_strips_mast_prefix(monkeypatch):
     collection = CatalogCollection(collection_name)
     collection._parent_collection = "mast_catalogs"
     collection._catalogs = Table({
-        "catalog_name": ["mast_cat_tic.source", "mast_cat_tic.other"],
+        "catalog_name": ["mast_cat_tic.source", "mast_cat_tic.zeta", "mast_cat_tic.other",
+                         "mast_cat_tic.other"],
     })
+    other_collection = CatalogCollection("mast_cat_alpha")
+    other_collection._parent_collection = "mast_catalogs"
+    other_collection._catalogs = Table({"catalog_name": ["mast_cat_alpha.catalog"]})
     monkeypatch.setitem(Catalogs._collections_cache, collection_name, collection)
+    monkeypatch.setitem(Catalogs._collections_cache, other_collection.name, other_collection)
     monkeypatch.setattr(
         CatalogCollection,
         "discover_collections",
         classmethod(lambda cls: Table(
-            rows=[(collection_name, "mast_catalogs")],
+            rows=[(collection_name, "mast_catalogs"), (other_collection.name, "mast_catalogs"),
+                  (collection_name, "mast_catalogs")],
             names=("collection_name", "parent_collection"),
         )),
     )
     monkeypatch.setattr(
-        collection,
+        CatalogCollection,
         "get_catalog_metadata",
-        lambda catalog: CatalogMetadata(Table(), "ra", "dec", True),
+        lambda self, catalog: CatalogMetadata(Table(), "ra", "dec", True),
     )
 
     candidates = Catalogs.get_crossmatch_catalogs(collection_name, "mast_cat_tic.source")
-    assert candidates["collection_name"].tolist() == ["tic"]
-    assert candidates["catalog_name"].tolist() == ["tic.other"]
+    assert list(zip(candidates["collection_name"], candidates["catalog_name"])) == [
+        ("alpha", "alpha.catalog"), ("tic", "tic.other"), ("tic", "tic.zeta")
+    ]
 
 
 def test_catalogs_query_region(patch_tap):

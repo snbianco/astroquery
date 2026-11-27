@@ -198,6 +198,7 @@ class CatalogsClass(MastQueryWithLogin):
             Columns ``collection_name`` and ``catalog_name`` for catalogs on the same
             TAP endpoint that have identifiable RA/Dec columns. These are candidates;
             sharing an endpoint and having coordinates does not guarantee JOIN support.
+            Rows are unique and sorted by collection name, then catalog name.
 
         Notes
         -----
@@ -206,7 +207,7 @@ class CatalogsClass(MastQueryWithLogin):
         """
         collection_obj, catalog = self._parse_inputs(collection, catalog)
         discovered = CatalogCollection.discover_collections()
-        rows = []
+        rows = set()
 
         def display_name(name):
             # Remove the "mast_cat_" prefix for display purposes if applicable
@@ -226,8 +227,8 @@ class CatalogsClass(MastQueryWithLogin):
                     continue
                 metadata = candidate.get_catalog_metadata(name)
                 if metadata.ra_column and metadata.dec_column:
-                    rows.append((display_name(candidate.name), display_name(name)))
-        return Table(rows=rows, names=("collection_name", "catalog_name"), dtype=(str, str))
+                    rows.add((display_name(candidate.name), display_name(name)))
+        return Table(rows=sorted(rows), names=("collection_name", "catalog_name"), dtype=(str, str))
 
     def supports_spatial_queries(self, collection=None, catalog=None):
         """
@@ -888,7 +889,8 @@ class CatalogsClass(MastQueryWithLogin):
             Custom table aliases. Defaults to collection names, with ``_1`` and ``_2``
             appended when both collections match. The stable shorthand aliases
             ``cat1`` and ``cat2`` are also accepted in column selections, sorting,
-            and filters, regardless of the chosen aliases.
+            and filters, regardless of the chosen aliases; neither can be used as a
+            custom alias, regardless of case.
         include_separation : bool, optional
             Include a ``separation`` column in arcseconds. Default True. Ignored for
             ``count_only``. When included, it can also be used in ``sort_by``.
@@ -1049,12 +1051,11 @@ class CatalogsClass(MastQueryWithLogin):
             default_alias1, default_alias2 = f"{default_alias1}_1", f"{default_alias2}_2"
         alias_1 = alias_1 or default_alias1
         alias_2 = alias_2 or default_alias2
+        if any(alias.casefold() in {"cat1", "cat2"} for alias in (alias_1, alias_2)):
+            raise InvalidQueryError("Aliases `cat1` and `cat2` are reserved and cannot be used for `alias_1` "
+                                    "or `alias_2`.")
         if alias_1.casefold() == alias_2.casefold():
             raise InvalidQueryError("`alias_1` and `alias_2` must be distinct.")
-        if alias_1.casefold() == "cat2" or alias_2.casefold() == "cat1":
-            raise InvalidQueryError(
-                "Aliases `cat1` and `cat2` are reserved for the first and second catalog respectively."
-            )
 
         cols_1 = {c.lower() for c in meta1.column_metadata["column_name"]}
         cols_2 = {c.lower() for c in meta2.column_metadata["column_name"]}

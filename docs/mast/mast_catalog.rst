@@ -548,7 +548,8 @@ Column names present in both catalogs must be qualified. ``cat1`` and ``cat2``
 always refer to the first and second catalog. Collection names are also
 accepted as aliases; when both collections match, default aliases gain ``_1``
 and ``_2`` suffixes. Custom aliases can be set with the ``alias_1`` and
-``alias_2`` parameters. Both dotted and underscore forms are accepted in ``select_cols``,
+``alias_2`` parameters, but cannot be ``cat1`` or ``cat2`` (case-insensitive).
+Both dotted and underscore forms are accepted in ``select_cols``,
 ``sort_by``, filters, and keyword criteria. Use dotted qualification when an
 underscore-qualified name collides with a real column name.
 
