@@ -1502,12 +1502,13 @@ class CatalogsClass(MastQueryWithLogin):
             If the target is not a valid collection name or (collection, catalog) pair.
         """
         if isinstance(target, str) and target.strip():
+            target = target.strip()
             collection_obj = self._get_collection_obj(target)
             return collection_obj.name, collection_obj.default_catalog
 
         if (isinstance(target, (tuple, list)) and len(target) == 2
                 and all(isinstance(value, str) and value.strip() for value in target)):
-            return tuple(target)
+            return tuple(value.strip() for value in target)
 
         raise InvalidQueryError("Each target must be a collection name or a (collection, catalog) pair of strings.")
 
@@ -1807,7 +1808,7 @@ class CatalogsClass(MastQueryWithLogin):
             if name.lower() not in valid_columns:
                 closest = difflib.get_close_matches(name.lower(), sorted(valid_columns), n=1)
                 suggestion = f" Did you mean '{resolved_alias}.{closest[0]}'?" if closest else ""
-                raise InvalidQueryError(f"Column '{col}' was not found in catalog '{resolved_alias}'.{suggestion}")
+                raise InvalidQueryError(f"Column '{col}' was not found in '{resolved_alias}'.{suggestion}")
             return f"{resolved_alias}.{name}"
 
         # If the column is not qualified with a table alias, determine which catalog it belongs to

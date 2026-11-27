@@ -368,7 +368,7 @@ def vo_tap_mock():
             if 'empty' in query:
                 result = result[:0]
             return TAPResults(from_table(result))
-        elif 'WHERE' in query or 'JOIN' in query:
+        elif 'WHERE' in query:
             # Queries with results, keep in mind this is not meaningful and results won't match the query
             filename = data_path(DATA_FILES['tap_results'])
         votable = parse(filename)

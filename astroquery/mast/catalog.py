@@ -47,8 +47,6 @@ class Catalog:
         if catalog is not None and (not isinstance(catalog, str) or not catalog.strip()):
             raise InvalidQueryError("Catalog name must be a non-empty string.")
         self._query = CatalogsClass(collection=collection, catalog=catalog)
-        if catalog is None:
-            self._query.catalog = self._query.catalog
 
     @property
     def collection_name(self):
@@ -71,8 +69,8 @@ class Catalog:
 
         Returns
         -------
-        list of str
-            The list of catalog names that can be crossmatched with this catalog.
+        Table
+            An `~astropy.table.Table` listing the crossmatchable catalogs.
         """
         return self._query.get_crossmatch_catalogs(
             collection=self.collection_name,
